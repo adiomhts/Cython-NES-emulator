@@ -13,8 +13,14 @@ class NES:
         self.screen = pygame.display.set_mode((256, 240))
         pygame.display.set_caption("NES Emulator")
         
+        self.cartridge = Cartridge(rom_path)  # Сначала грузим картридж!
+        
+        # Читаем зеркалирование из картриджа (бит 0 флага 6)
+        # 0 = Horizontal, 1 = Vertical
+        mirroring_mode = self.cartridge.mirroring
+        
         self.cpu = CPU6502()
-        self.ppu = PPU(mirroring=0)
+        self.ppu = PPU(mirroring=mirroring_mode) # Передаем зеркалирование
         # Allow PPU to trigger CPU interrupts (NMI)
         try:
             self.ppu.cpu = self.cpu
@@ -83,12 +89,27 @@ class NES:
         pygame.display.flip()
 
     def run_frame(self):
-        for _ in range(29780):  # Один кадр NES занимает ~29780 тактов
+        frame_cycles = 0
+        # 29780 - приблизительное количество тактов CPU в одном кадре NTSC
+        while frame_cycles < 29780:
+            # 1. Запоминаем текущее количество тактов CPU
+            cycles_before = self.cpu.cycles
+            
+            # 2. Выполняем ОДНУ инструкцию
             self.cpu.step()
-            # NES PPU runs at 3x the CPU clock: run 3 PPU cycles per CPU cycle
-            for _ in range(3):
+            
+            # 3. Считаем, сколько тактов она заняла на самом деле
+            cycles_diff = self.cpu.cycles - cycles_before
+            
+            # 4. "Догоняем" PPU: он должен сделать в 3 раза больше шагов
+            ppu_steps = cycles_diff * 3
+            for _ in range(ppu_steps):
                 self.ppu.step()
-            # Update APU with the CPU cycles that have passed
-            self.apu.step(self.cpu.cycles)
-        # Frame is rendered incrementally during ppu.step(); just blit the current buffer
+            
+            # 5. APU работает на частоте CPU (синхронно по тактам)
+            # (Исправляем ошибку, где передавалось self.cpu.cycles - общее время)
+            self.apu.step(cycles_diff)
+            
+            frame_cycles += cycles_diff
+            
         self.render_screen()

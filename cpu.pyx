@@ -302,16 +302,26 @@ cdef void op_BRANCH(CPU6502 cpu, bint cond):
         cpu.cycles += 1
 
 cdef void op_JMP(CPU6502 cpu):
-    cdef uint16_t off, hi, old_pc
-    if cpu.current_instruction == 0x4C:
+    cdef uint16_t off
+    cdef uint16_t addr_low, addr_high
+    
+    if cpu.current_instruction == 0x4C: # Absolute
         cpu.PC = cpu.next_word()
-    elif cpu.current_instruction == 0x6C:
+    elif cpu.current_instruction == 0x6C: # Indirect
         off = cpu.next_word()
-        hi = off if (off & 0xFF) != 0xFF else off - 0xFF
-        old_pc = cpu.PC
-        cpu.PC = <uint16_t>(cpu.read_byte(off) | (cpu.read_byte(hi + 1) << 8))
-        if (old_pc & 0xFF00) != (cpu.PC & 0xFF00):
-            cpu.cycles += 2
+        
+        # Читаем младший байт адреса перехода
+        addr_low = cpu.read_byte(off)
+        
+        # Читаем старший байт с эмуляцией аппаратного бага 6502:
+        # Если указатель находится на границе страницы (например $30FF),
+        # то старший байт берется не из $3100, а из $3000 (заворот внутри страницы).
+        if (off & 0x00FF) == 0x00FF:
+            addr_high = cpu.read_byte(off & 0xFF00)
+        else:
+            addr_high = cpu.read_byte(off + 1)
+            
+        cpu.PC = <uint16_t>(addr_low | (addr_high << 8))
 
 cdef void op_BCS(CPU6502 cpu):
     op_BRANCH(cpu, cpu.F.carry)
@@ -583,30 +593,47 @@ cdef class CPU6502:
         return opcode
 
     cdef uint8_t read_byte(self, uint16_t address):
+        # 1. RAM
         if 0x0000 <= address <= 0x1FFF:
             return self.ram[address & 0x07FF]
-        if 0x8000 <= address <= 0xFFFF:
-            return self.cartridge.mapper_instance.read_prg(address)
+            
+        # 2. PPU
         if 0x2000 <= address <= 0x3FFF:
             reg = 0x2000 + (address % 8)
             return self.ppu.read_register(reg)
+            
+        # 3. APU / IO - ЭТОГО НЕ БЫЛО!
+        if 0x4000 <= address <= 0x401F:
+            return self.read_io_register(address)
+            
+        # 4. Cartridge (PRG-ROM)
+        if 0x8000 <= address <= 0xFFFF:
+            return self.cartridge.mapper_instance.read_prg(address)
+            
+        # 5. Остальная память
         return self.memory[address]
 
     cdef void write_byte(self, uint16_t address, uint8_t value):
+        # 1. PPU Registers ($2000-$3FFF)
         if 0x2000 <= address <= 0x3FFF:
-            reg = 0x2000 + (address % 8)  # Mirror every 8 bytes
-            try:
-                pc = getattr(self, 'PC', None)
-                # if pc is not None:
-                #     print(f"CPU: write to PPU reg {reg:#04x} value {value:#04x} @ addr {address:#06x} (PC={pc:#06x})")
-                # else:
-                #     print(f"CPU: write to PPU reg {reg:#04x} value {value:#04x} @ addr {address:#06x}")
-            except Exception:
-                pass
+            reg = 0x2000 + (address % 8)
             self.ppu.write_register(reg, value)
             return
+            
+        # 2. APU / IO Registers ($4000-$401F) - ЭТОГО НЕ БЫЛО!
+        if 0x4000 <= address <= 0x401F:
+            self.write_io_register(address, value)
+            return
+
+        # 3. RAM ($0000-$1FFF)
         if 0x0000 <= address <= 0x1FFF:
             self.ram[address & 0x07FF] = value
+            
+        # 4. Cartridge / Mapper (PRG-ROM обычно Read-Only, но мапперы перехватывают запись)
+        elif address >= 0x8000:
+            self.cartridge.mapper_instance.write_prg(address, value)
+            
+        # 5. Остальная память
         else:
             self.memory[address] = value
 
@@ -754,17 +781,42 @@ cdef class CPU6502:
                 pass
 
     cdef void write_io_register(self, uint16_t reg, uint8_t val):
-        if reg == 0x4014:
+        cdef int i
+        cdef uint16_t dma_start
+        # Используем numpy для создания временного буфера (или можно добавить поле в класс для скорости)
+        cdef uint8_t[:] dma_buffer 
+
+        if reg == 0x4014: # OAM DMA
+            # 1. Вычисляем стартовый адрес: val * 256
+            dma_start = <uint16_t>val << 8
+            
+            # 2. Создаем буфер для передачи
+            # (Важно: создаем новый массив, чтобы передать memoryview)
+            dma_buffer = np.zeros(256, dtype=np.uint8)
+            
+            # 3. Читаем 256 байт из памяти CPU (с учетом всех мапперов и RAM)
+            for i in range(256):
+                dma_buffer[i] = self.read_byte(dma_start + i)
+            
+            # 4. Передаем заполненный буфер в PPU
             if self.ppu is not None:
-                self.ppu.perform_dma(val)
-        elif reg == 0x4016:
+                self.ppu.perform_dma(dma_buffer)
+            
+            # 5. Эмуляция задержки CPU (513 или 514 циклов)
+            self.cycles += 513
+            if self.cycles % 2 == 1:
+                self.cycles += 1
+                
+        elif reg == 0x4016: # Controller Strobe
             if self.controller is not None:
                 self.controller.write(val)
-        elif reg <= 0x401F:
+                
+        elif reg <= 0x401F: # APU Registers
             if self.apu is not None:
                 self.apu.write(reg, val)
         else:
-            raise NotImplementedError(f"{reg:04X} = {val:02X}")
+            # Другие регистры (не реализованы или не нужны)
+            pass
 
 
     cdef uint8_t read_io_register(self, uint16_t reg):
