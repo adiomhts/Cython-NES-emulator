@@ -73,7 +73,7 @@ pip install -r requirements.txt
 ```
 
 # Compile Cython modules into C-extensions
-# This will generate .so or .pyd files depending on your OS
+This will generate .so or .pyd files depending on your OS
 ``` bash
 python setup.py build_ext --inplace
 ```
