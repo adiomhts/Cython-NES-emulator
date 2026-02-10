@@ -1,6 +1,3 @@
-# Core requirements for the NES Emulator
-# Install via: pip install -r requirements.txt
-
 pygame>=2.5.0
 numpy>=1.24.0
 Cython>=3.0.0

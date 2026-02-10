@@ -13,14 +13,13 @@ class NES:
         self.screen = pygame.display.set_mode((256, 240))
         pygame.display.set_caption("NES Emulator")
         
-        self.cartridge = Cartridge(rom_path)  # Сначала грузим картридж!
+        self.cartridge = Cartridge(rom_path) 
         
         # Читаем зеркалирование из картриджа (бит 0 флага 6)
-        # 0 = Horizontal, 1 = Vertical
         mirroring_mode = self.cartridge.mirroring
-        
+
         self.cpu = CPU6502()
-        self.ppu = PPU(mirroring=mirroring_mode) # Передаем зеркалирование
+        self.ppu = PPU(mirroring=mirroring_mode)
         # Allow PPU to trigger CPU interrupts (NMI)
         try:
             self.ppu.cpu = self.cpu
@@ -83,7 +82,7 @@ class NES:
         self.cpu.reset()
 
     def render_screen(self):
-        # PPU.frame_buffer is (240,256,3) (height,width,channels) — pygame wants (width,height,3)
+        # PPU.frame_buffer is (240,256,3) (height,width,channels), pygame wants (width,height,3)
         surface = pygame.surfarray.make_surface(self.ppu.frame_buffer.swapaxes(0, 1))
         self.screen.blit(surface, (0, 0))
         pygame.display.flip()
@@ -103,11 +102,9 @@ class NES:
             
             # 4. "Догоняем" PPU: он должен сделать в 3 раза больше шагов
             ppu_steps = cycles_diff * 3
-            for _ in range(ppu_steps):
-                self.ppu.step()
+            self.ppu.step_many(ppu_steps)
             
             # 5. APU работает на частоте CPU (синхронно по тактам)
-            # (Исправляем ошибку, где передавалось self.cpu.cycles - общее время)
             self.apu.step(cycles_diff)
             
             frame_cycles += cycles_diff

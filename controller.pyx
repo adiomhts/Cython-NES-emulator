@@ -10,7 +10,6 @@ cdef class Controller:
         self.shift_reg = 0
         self.strobe = False
 
-    # Этот метод вызывай из main.py/Pygame loop
     # Ожидает список булевых значений: [A, B, Select, Start, Up, Down, Left, Right]
     def update(self, list buttons_state):
         self.buttons = 0

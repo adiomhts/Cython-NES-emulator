@@ -9,7 +9,6 @@ cdef class Cartridge:
     cdef unsigned char[:] prg_rom_view
     cdef unsigned char[:] chr_rom_view
     
-    # === ДОБАВЛЕНО: mirroring ===
     cdef public uint8_t mapper, prg_banks, chr_banks, mirroring
     cdef public object mapper_instance
 
@@ -23,8 +22,6 @@ cdef class Cartridge:
         self.prg_banks = data[4]
         self.chr_banks = data[5]
         
-        # === ДОБАВЛЕНО: Чтение зеркалирования ===
-        # Бит 0 флага 6 отвечает за зеркалирование: 0 = Horizontal, 1 = Vertical
         self.mirroring = data[6] & 1
         
         self.mapper = ((data[6] >> 4) | ((data[7] & 0xF0) >> 4))
@@ -43,7 +40,7 @@ cdef class Cartridge:
             self.prg_rom = np.zeros(0, dtype=np.uint8)
 
         if chr_size == 0:
-            print("CHR-ROM отсутствует, создаем RAM для графики (8KB)")
+            # print("CHR-ROM отсутствует, создаем RAM для графики (8KB)")
             self.chr_rom = np.zeros(8192, dtype=np.uint8)
             self.chr_banks = 1
         else:
@@ -52,11 +49,10 @@ cdef class Cartridge:
         self.prg_rom_view = self.prg_rom
         self.chr_rom_view = self.chr_rom
 
-        print(f"PRG: {len(self.prg_rom)}, CHR: {len(self.chr_rom)}, Mapper: {self.mapper}, Mirroring: {'Vertical' if self.mirroring else 'Horizontal'}")
+        # print(f"PRG: {len(self.prg_rom)}, CHR: {len(self.chr_rom)}, Mapper: {self.mapper}, Mirroring: {'Vertical' if self.mirroring else 'Horizontal'}")
 
         self.load_mapper()
 
-    # ... (остальные методы без изменений: load_mapper, read_prg и т.д.) ...
     
     def load_mapper(self):
         if self.mapper == 0:

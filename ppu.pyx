@@ -38,6 +38,8 @@ cdef class PPU:
     
     cdef public object chr_rom
     cdef public object cpu
+    cdef public int force_bg_pattern
+    cdef public int force_sprite_pattern
 
     def __init__(self, mirroring=0):
         self.scanline = 0
@@ -81,6 +83,20 @@ cdef class PPU:
         self.scanline_bg = np.zeros(256, dtype=np.uint8)
         self.sprite0_in_scanline = -1
         self._debug_force_palette = False
+        self.force_bg_pattern = -1
+        self.force_sprite_pattern = -1
+
+    cpdef public uint16_t debug_get_v(self):
+        return self.v
+
+    cpdef public uint16_t debug_get_t(self):
+        return self.t
+
+    cpdef public uint8_t debug_get_scroll_x(self):
+        return self.scroll_x
+
+    cpdef public uint8_t debug_get_scroll_y(self):
+        return self.scroll_y
 
     # === Helpers ===
     
@@ -139,7 +155,7 @@ cdef class PPU:
 
     # === STEP ===
 
-    cpdef public void step(self):
+    cdef void _step_core(self):
         # Все объявления в самом начале
         cdef int spr0_y, spr0_x
         cdef bint rendering_enabled
@@ -197,6 +213,14 @@ cdef class PPU:
                     self.copy_x()
                 self.sprite_evaluate()
                 self.sprite_render()
+
+    cpdef public void step(self):
+        self._step_core()
+
+    cpdef public void step_many(self, int steps):
+        cdef int i
+        for i in range(steps):
+            self._step_core()
 
     cpdef public void trigger_vblank(self):
         self.vblank_flag = 1
@@ -283,7 +307,6 @@ cdef class PPU:
             else:
                 pal_addr = self.get_vram_mirror(addr)
                 ret = self.palette_ram[pal_addr]
-                self.read_buffer = self.vram[self.get_vram_mirror(addr - 1000)]
             self.increment_v()
             return ret
         return 0
@@ -296,75 +319,95 @@ cdef class PPU:
 
         if self.chr_rom is None:
             return
-
-        # Объявляем переменные В НАЧАЛЕ
-        cdef int coarse_y, nametable_y, nametable_x, coarse_x_start, fine_y, fine_x
-        cdef int start_global_x, x, pixel_x_scroll
-        cdef int current_nt_x, tile_x, tile_y, current_nt
+        # Объявляем переменные
+        cdef int base_nt, base_x, base_y
+        cdef int global_x, global_y, x_in_nt, y_in_nt
+        cdef int x, pixel_in_tile_x
+        cdef int current_nt_x, current_nt_y, tile_x, tile_y, current_nt
         cdef int nt_addr, tile_index, tile_offset
         cdef int attr_addr, attr_byte, shift, palette_index
         cdef uint8_t low, high, bit0, bit1, pix
-        cdef int pal_idx
+        cdef int pal_idx, pal0
         cdef int bg_pattern_base
-        cdef bint palette_empty
+        cdef bint palette_empty, tile_valid
+        cdef int i
+        cdef uint8_t[:] vram = self.vram
+        cdef uint8_t[:] palette_ram = self.palette_ram
+        cdef uint8_t[:] scanline_bg = self.scanline_bg
+        cdef uint8_t[:, :, :] frame_buffer = self.frame_buffer
+        cdef int[:, :] nes_palette = self.nes_palette
+        cdef uint8_t[:] chr_rom = self.chr_rom
+        cdef int chr_len = chr_rom.shape[0]
 
         # Инициализация
-        coarse_y = (self.v >> 5) & 0x1F
-        nametable_y = (self.v >> 11) & 0x01
-        nametable_x = (self.v >> 10) & 0x01
-        coarse_x_start = (self.v & 0x1F)
-        fine_y = (self.v >> 12) & 0x07
-        fine_x = self.fine_x
-
-        start_global_x = (nametable_x * 256) + (coarse_x_start * 8)
-        bg_pattern_base = 0x1000 if (self.ctrl & 0x10) else 0x0000
+        base_nt = self.ctrl & 0x03
+        base_x = (base_nt & 1) * 256
+        base_y = ((base_nt >> 1) & 1) * 240
+        global_y = base_y + self.scroll_y + line
+        current_nt_y = (global_y // 240) & 1
+        y_in_nt = global_y % 240
+        tile_y = y_in_nt >> 3
+        fine_y = y_in_nt & 0x07
+        if self.force_bg_pattern in (0, 1):
+            bg_pattern_base = 0x1000 if self.force_bg_pattern == 1 else 0x0000
+        else:
+            bg_pattern_base = 0x1000 if (self.ctrl & 0x10) else 0x0000
 
         palette_empty = True
         for i in range(32):
-            if int(self.palette_ram[i]) != 0:
+            if palette_ram[i] != 0:
                 palette_empty = False
                 break
+        pal0 = palette_ram[0] & 0x3F
+
+        tile_valid = False
 
         for x in range(256):
-            pixel_x_scroll = start_global_x + x + fine_x
-            
-            current_nt_x = (pixel_x_scroll // 256) % 2
-            tile_x = (pixel_x_scroll % 256) // 8
-            tile_y = coarse_y
-            current_nt = (nametable_y * 2) + current_nt_x
-            
-            nt_addr = self.get_vram_mirror(0x2000 + (current_nt * 0x400) + tile_y * 32 + tile_x)
-            tile_index = int(self.vram[nt_addr])
-            tile_offset = bg_pattern_base + tile_index * 16
+            global_x = base_x + self.scroll_x + x
+            current_nt_x = (global_x >> 8) & 1
+            x_in_nt = global_x & 0xFF
+            pixel_in_tile_x = x_in_nt & 7
+            if x == 0 or pixel_in_tile_x == 0:
+                tile_x = x_in_nt >> 3
+                current_nt = (current_nt_y * 2) + current_nt_x
 
-            if tile_offset + 16 > len(self.chr_rom):
-                self.scanline_bg[x] = 0
-                self.frame_buffer[line, x] = self.nes_palette[self.palette_ram[0] & 0x3F]
-                continue
+                nt_addr = self.get_vram_mirror(0x2000 + (current_nt * 0x400) + tile_y * 32 + tile_x)
+                tile_index = vram[nt_addr]
+                tile_offset = bg_pattern_base + tile_index * 16
 
-            low = self.chr_rom[tile_offset + fine_y]
-            high = self.chr_rom[tile_offset + 8 + fine_y]
-            pixel_in_tile_x = (pixel_x_scroll % 8)
-            bit0 = (low >> (7 - pixel_in_tile_x)) & 1
-            bit1 = (high >> (7 - pixel_in_tile_x)) & 1
-            pix = (bit1 << 1) | bit0
+                if tile_offset + 16 > chr_len:
+                    tile_valid = False
+                else:
+                    tile_valid = True
+                    low = chr_rom[tile_offset + fine_y]
+                    high = chr_rom[tile_offset + 8 + fine_y]
 
-            # ВАЖНО: Используем правильную формулу атрибутов (0x23C0)
-            attr_addr = self.get_vram_mirror((0x2000 + current_nt * 0x400) + 0x23C0 + (tile_y // 4) * 8 + (tile_x // 4))
-            attr_byte = int(self.vram[attr_addr])
-            shift = (((tile_y // 2) % 2) * 4) + (((tile_x // 2) % 2) * 2)
-            palette_index = (attr_byte >> shift) & 0x03
+                attr_addr = self.get_vram_mirror(
+                    0x2000 + (current_nt * 0x400) + 0x3C0 + ((tile_y >> 2) * 8) + (tile_x >> 2)
+                )
+                attr_byte = vram[attr_addr]
+                shift = ((tile_y & 0x02) << 1) | (tile_x & 0x02)
+                palette_index = (attr_byte >> shift) & 0x03
+
+            if tile_valid:
+                bit0 = (low >> (7 - pixel_in_tile_x)) & 1
+                bit1 = (high >> (7 - pixel_in_tile_x)) & 1
+                pix = (bit1 << 1) | bit0
+            else:
+                pix = 0
 
             if palette_empty and not self._debug_force_palette:
-                pal_idx = int(self.palette_ram[0]) & 0x3F
+                pal_idx = pal0
             else:
                 if pix == 0:
-                    pal_idx = int(self.palette_ram[0]) & 0x3F
+                    pal_idx = pal0
                 else:
-                    pal_idx = int(self.palette_ram[palette_index * 4 + pix]) & 0x3F
+                    pal_idx = palette_ram[palette_index * 4 + pix] & 0x3F
             
-            self.scanline_bg[x] = pix
-            self.frame_buffer[line, x] = self.nes_palette[pal_idx]
+            scanline_bg[x] = pix
+            frame_buffer[line, x, 0] = nes_palette[pal_idx, 0]
+            frame_buffer[line, x, 1] = nes_palette[pal_idx, 1]
+            frame_buffer[line, x, 2] = nes_palette[pal_idx, 2]
 
     cpdef public void sprite_evaluate(self):
         cdef int oam_idx, y, start, j
@@ -397,7 +440,11 @@ cdef class PPU:
             return
             
         cdef int height = 16 if (self.ctrl & 0x20) else 8
-        cdef int sprite_table_base = 0x1000 if (self.ctrl & 0x08) else 0x0000
+        cdef int sprite_table_base
+        if self.force_sprite_pattern in (0, 1):
+            sprite_table_base = 0x1000 if self.force_sprite_pattern == 1 else 0x0000
+        else:
+            sprite_table_base = 0x1000 if (self.ctrl & 0x08) else 0x0000
         cdef int i, base, y, tile_index, attr, x, palette_index
         cdef bint flip_x, flip_y, priority_front
         cdef int scanline_y, tile_row, tile_offset, bank, base_index
