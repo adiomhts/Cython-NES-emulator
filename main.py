@@ -112,7 +112,7 @@ if __name__ == "__main__":
 
         # 3. Эмуляция кадра
         nes.run_frame()
-        # frame_count += 1
+        frame_count += 1
 
         # Optional: dump nametable once for debugging
         if dump_nametable and frame_count in dump_frames:

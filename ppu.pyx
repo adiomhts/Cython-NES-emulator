@@ -46,7 +46,7 @@ cdef class PPU:
         self.cycle = 0
         self.frame_buffer = np.zeros((240, 256, 3), dtype=np.uint8)
         
-        self.oam_data = np.zeros(256, dtype=np.uint8)
+        self.oam_data = np.full(256, 0xFF, dtype=np.uint8)
         self.vram = np.zeros(2048, dtype=np.uint8)
         self.palette_ram = np.zeros(32, dtype=np.uint8)
         
@@ -204,15 +204,18 @@ cdef class PPU:
         # Visible lines
         if 0 <= self.scanline < 240:
             if self.cycle == 256:
-                self.render_scanline(self.scanline)
                 if rendering_enabled:
+                    self.render_scanline(self.scanline)
                     self.increment_scroll_y()
+                else:
+                    # Clear bg scanline if rendering is disabled to avoid ghosting in sprites
+                    for i in range(256): self.scanline_bg[i] = 0
             
             if self.cycle == 257:
                 if rendering_enabled:
                     self.copy_x()
-                self.sprite_evaluate()
-                self.sprite_render()
+                    self.sprite_evaluate()
+                    self.sprite_render()
 
     cpdef public void step(self):
         self._step_core()
@@ -438,6 +441,8 @@ cdef class PPU:
     cpdef public void sprite_render(self):
         if self.chr_rom is None:
             return
+        if not (self.mask & 0x10):
+            return
             
         cdef int height = 16 if (self.ctrl & 0x20) else 8
         cdef int sprite_table_base
@@ -453,7 +458,7 @@ cdef class PPU:
         
         for i in range(self.sprite_count - 1, -1, -1):
             base = i * 4
-            y = int(self.scanline_oam[base])
+            y = int(self.scanline_oam[base]) + 1
             tile_index = int(self.scanline_oam[base + 1])
             attr = int(self.scanline_oam[base + 2])
             x = int(self.scanline_oam[base + 3])
@@ -467,9 +472,11 @@ cdef class PPU:
             if scanline_y < 0 or scanline_y >= height:
                 continue
                 
+            if flip_y:
+                scanline_y = (height - 1) - scanline_y
+
             if height == 8:
                 tile_row = scanline_y
-                if flip_y: tile_row = 7 - scanline_y
                 tile_offset = sprite_table_base + tile_index * 16
             else:
                 bank = (tile_index & 1) * 0x1000
@@ -480,7 +487,6 @@ cdef class PPU:
                 else:
                     tile_row = scanline_y - 8
                     tile_offset = bank + (base_index + 1) * 16
-                if flip_y: tile_row = 7 - tile_row
 
             if tile_offset + 8 >= len(self.chr_rom):
                 continue

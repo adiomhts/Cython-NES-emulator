@@ -564,8 +564,8 @@ cdef class CPU6502:
         self.PC = <uint16_t>0x0000
         self.F = CPUFlags()
         self.F.interrupts_disabled = True
-        self.memory = np.zeros(0x10000, dtype=np.uint8)
-        self.ram = np.zeros(0x0800, dtype=np.uint8)
+        self.memory = np.full(0x10000, 0x00, dtype=np.uint8)
+        self.ram = np.full(0x0800, 0xFF, dtype=np.uint8)
         self.cycles = 0
         self.current_instruction = 0
         self.current_memory_address = 0
