@@ -280,10 +280,14 @@ cdef class PPU:
                 
         elif reg == 0x2007: 
             addr = self.v & 0x3FFF
-            if 0x2000 <= addr < 0x3F00:
+            if addr < 0x2000:
+                # CHR-RAM write (only meaningful when CHR is RAM, ignored for CHR-ROM)
+                if self.chr_rom is not None and addr < len(self.chr_rom):
+                    self.chr_rom[addr] = value
+            elif addr < 0x3F00:
                 phys = self.get_vram_mirror(addr)
                 self.vram[phys] = value
-            elif 0x3F00 <= addr < 0x4000:
+            elif addr < 0x4000:
                 pal_addr = self.get_vram_mirror(addr)
                 self.palette_ram[pal_addr] = value
             self.increment_v()
@@ -291,6 +295,7 @@ cdef class PPU:
     cpdef public uint8_t read_register(self, uint16_t reg):
         cdef int addr, pal_addr
         cdef uint8_t ret
+        cdef uint8_t[:] chr_view_r
         reg = reg & 0x2007
         
         if reg == 0x2002: 
@@ -304,10 +309,20 @@ cdef class PPU:
             
         elif reg == 0x2007: 
             addr = self.v & 0x3FFF
-            if addr < 0x3F00:
+            if addr < 0x2000:
+                # CHR-ROM/RAM space — buffered read
+                ret = self.read_buffer
+                if self.chr_rom is not None and addr < len(self.chr_rom):
+                    chr_view_r = self.chr_rom
+                    self.read_buffer = chr_view_r[addr]
+                else:
+                    self.read_buffer = 0
+            elif addr < 0x3F00:
+                # Nametable / attribute table space — buffered read
                 ret = self.read_buffer
                 self.read_buffer = self.vram[self.get_vram_mirror(addr)]
             else:
+                # Palette space — no buffer delay
                 pal_addr = self.get_vram_mirror(addr)
                 ret = self.palette_ram[pal_addr]
             self.increment_v()

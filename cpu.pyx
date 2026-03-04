@@ -429,8 +429,9 @@ cdef void op_ADC(CPU6502 cpu):
     cpu.F.negative = (cpu.A & 0x80) > 0
 
 cdef void op_BRK(CPU6502 cpu):
-    cpu.next_byte()
-    cpu.push(cpu.get_P() | 0x10)
+    cpu.next_byte()           # consume padding byte; PC now = BRK+2
+    cpu.push_word(cpu.PC)     # push return address (PC+2) hi then lo
+    cpu.push(cpu.get_P() | 0x10)  # push P with B flag set
     cpu.F.interrupts_disabled = True
     cpu.PC = cpu.read_word(0xFFFE)
 
