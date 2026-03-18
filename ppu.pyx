@@ -36,19 +36,12 @@ cdef class PPU:
     cdef int sprite0_hit_x
     cdef uint8_t[:] scanline_bg
     cdef int sprite0_in_scanline
-    cdef bint _debug_force_palette
     
     # NES palette
     cdef int[:, :] nes_palette
     
     cdef public object chr_rom
     cdef public object cpu
-    cdef public int force_bg_pattern
-    cdef public int force_sprite_pattern
-
-    # Debug: log v and fine_x for each scanline (first frame only)
-    cdef public object _dbg_v_log   # list of (scanline, v, fine_x) tuples
-    cdef public bint _dbg_log_enabled
 
     def __init__(self, mirroring=0):
         self.scanline = 0
@@ -93,23 +86,6 @@ cdef class PPU:
         self.chr_rom = None
         self.scanline_bg = np.zeros(256, dtype=np.uint8)
         self.sprite0_in_scanline = -1
-        self._debug_force_palette = False
-        self.force_bg_pattern = -1
-        self.force_sprite_pattern = -1
-        self._dbg_v_log = []
-        self._dbg_log_enabled = False
-
-    cpdef public uint16_t debug_get_v(self):
-        return self.v
-
-    cpdef public uint16_t debug_get_t(self):
-        return self.t
-
-    cpdef public uint8_t debug_get_scroll_x(self):
-        return self.scroll_x
-
-    cpdef public uint8_t debug_get_scroll_y(self):
-        return self.scroll_y
 
     # === Helpers ===
     
@@ -131,6 +107,21 @@ cdef class PPU:
             else:
                 y += 1
             self.v = (self.v & ~0x03E0) | (y << 5)
+
+    cdef void increment_scroll_x(self):
+        if (self.v & 0x001F) == 31:
+            self.v &= ~0x001F
+            self.v ^= 0x0400
+        else:
+            self.v += 1
+
+    cdef void increment_v_2007(self):
+        # NESdev: during rendering, PPUDATA access increments coarse X and Y together.
+        if (self.mask & 0x18) != 0 and ((0 <= self.scanline < 240) or self.scanline == 261):
+            self.increment_scroll_x()
+            self.increment_scroll_y()
+        else:
+            self.increment_v()
 
     cdef void copy_x(self):
         self.v = (self.v & 0xFBE0) | (self.t & 0x041F)
@@ -171,7 +162,7 @@ cdef class PPU:
     cdef void _step_core(self):
         # Все объявления в самом начале
         cdef bint rendering_enabled
-        cdef int i
+        cdef int i, pal_idx_line
         
         self.cycle += 1
         rendering_enabled = (self.mask & 0x18) != 0
@@ -181,14 +172,25 @@ cdef class PPU:
         if self.cycle == 1:
             self.snap_fine_x = self.fine_x
             if 0 <= self.scanline < 240:
-                if rendering_enabled:
+                if rendering_enabled and (self.mask & 0x08):
                     self.render_scanline(self.scanline)
+                else:
+                    # Fill line with backdrop color so previous-frame pixels do not leak
+                    # when background rendering is disabled.
+                    pal_idx_line = self.palette_ram[0] & 0x3F
+                    for i in range(256):
+                        self.frame_buffer[self.scanline, i, 0] = self.nes_palette[pal_idx_line, 0]
+                        self.frame_buffer[self.scanline, i, 1] = self.nes_palette[pal_idx_line, 1]
+                        self.frame_buffer[self.scanline, i, 2] = self.nes_palette[pal_idx_line, 2]
+
+                    # Clear bg coverage map to keep sprite/background priority correct.
+                    for i in range(256):
+                        self.scanline_bg[i] = 0
+
+                if (self.mask & 0x18) == 0x18:
                     self.sprite0_hit_x = self._find_sprite0_hit_x(self.scanline)
                 else:
                     self.sprite0_hit_x = -1
-                    # Clear bg scanline if rendering is disabled to avoid ghosting in sprites
-                    for i in range(256):
-                        self.scanline_bg[i] = 0
 
         # Sprite 0 hit timing: set status when the first overlapping pixel is reached.
         if rendering_enabled and not self.sprite0_hit and self.sprite0_hit_x >= 0:
@@ -306,7 +308,7 @@ cdef class PPU:
             elif addr < 0x4000:
                 pal_addr = self.get_vram_mirror(addr)
                 self.palette_ram[pal_addr] = value
-            self.increment_v()
+            self.increment_v_2007()
 
     cpdef public uint8_t read_register(self, uint16_t reg):
         cdef int addr, pal_addr
@@ -341,7 +343,7 @@ cdef class PPU:
                 # Palette space — no buffer delay
                 pal_addr = self.get_vram_mirror(addr)
                 ret = self.palette_ram[pal_addr]
-            self.increment_v()
+            self.increment_v_2007()
             return ret
         return 0
 
@@ -381,17 +383,11 @@ cdef class PPU:
         coarse_x_start = self.v & 31
         fine_x_start  = self.snap_fine_x   # snapshotted at cycle 1 of this scanline
 
-        if self._dbg_log_enabled and line < 35:
-            self._dbg_v_log.append((line, self.v, self.snap_fine_x, coarse_x_start, fine_y))
-
         nt_x_base = nt_select & 1
         nt_y_base = (nt_select >> 1) & 1
         tile_y    = coarse_y_v           # tile row in the nametable
 
-        if self.force_bg_pattern in (0, 1):
-            bg_pattern_base = 0x1000 if self.force_bg_pattern == 1 else 0x0000
-        else:
-            bg_pattern_base = 0x1000 if (self.ctrl & 0x10) else 0x0000
+        bg_pattern_base = 0x1000 if (self.ctrl & 0x10) else 0x0000
 
         palette_empty = True
         for i in range(32):
@@ -447,13 +443,14 @@ cdef class PPU:
             else:
                 pix = 0
 
-            if palette_empty and not self._debug_force_palette:
+            # PPUMASK bit 1: hide background in leftmost 8 pixels when clear.
+            if x < 8 and not (self.mask & 0x02):
+                pix = 0
+
+            if palette_empty or pix == 0:
                 pal_idx = pal0
             else:
-                if pix == 0:
-                    pal_idx = pal0
-                else:
-                    pal_idx = palette_ram[palette_index * 4 + pix] & 0x3F
+                pal_idx = palette_ram[palette_index * 4 + pix] & 0x3F
             
             scanline_bg[x] = pix
             frame_buffer[line, x, 0] = nes_palette[pal_idx, 0]
@@ -470,7 +467,7 @@ cdef class PPU:
 
         if self.chr_rom is None:
             return -1
-        if not (self.mask & 0x18):
+        if (self.mask & 0x18) != 0x18:
             return -1
 
         y = int(self.oam_data[0]) + 1
@@ -488,10 +485,7 @@ cdef class PPU:
         if flip_y:
             scanline_y = (height - 1) - scanline_y
 
-        if self.force_sprite_pattern in (0, 1):
-            sprite_table_base = 0x1000 if self.force_sprite_pattern == 1 else 0x0000
-        else:
-            sprite_table_base = 0x1000 if (self.ctrl & 0x08) else 0x0000
+        sprite_table_base = 0x1000 if (self.ctrl & 0x08) else 0x0000
 
         if height == 8:
             tile_row = scanline_y
@@ -566,10 +560,7 @@ cdef class PPU:
             
         cdef int height = 16 if (self.ctrl & 0x20) else 8
         cdef int sprite_table_base
-        if self.force_sprite_pattern in (0, 1):
-            sprite_table_base = 0x1000 if self.force_sprite_pattern == 1 else 0x0000
-        else:
-            sprite_table_base = 0x1000 if (self.ctrl & 0x08) else 0x0000
+        sprite_table_base = 0x1000 if (self.ctrl & 0x08) else 0x0000
         cdef int i, base, y, tile_index, attr, x, palette_index
         cdef bint flip_x, flip_y, priority_front
         cdef int scanline_y, tile_row, tile_offset, bank, base_index
@@ -617,6 +608,8 @@ cdef class PPU:
             for col in range(8):
                 sx = x + (7 - col if flip_x else col)
                 if sx < 0 or sx >= 256:
+                    continue
+                if sx < 8 and not (self.mask & 0x04):
                     continue
                     
                 bit0 = (low >> (7 - col)) & 1
