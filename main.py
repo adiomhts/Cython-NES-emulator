@@ -81,6 +81,11 @@ if __name__ == "__main__":
 
     print("Emulator started. Controls: Arrows=Move, Z=A, X=B, Enter=Start, RShift=Select")
 
+    # Enable per-scanline scroll debug logging
+    nes.ppu._dbg_log_enabled = True
+    nes.ppu._dbg_v_log = []
+    _last_scrolled_log = []   # last frame where scroll was non-zero
+
     while running:
         # 1. ОБРАБОТКА СОБЫТИЙ (Важно, чтобы окно не висло!)
         for event in pygame.event.get():
@@ -111,8 +116,13 @@ if __name__ == "__main__":
             nes.controller.update(input_state)
 
         # 3. Эмуляция кадра
+        nes.ppu._dbg_v_log = []  # keep only last frame
         nes.run_frame()
         frame_count += 1
+
+        # Save last frame where scroll was actually non-zero
+        if any(e[3] != 0 or e[2] != 0 for e in nes.ppu._dbg_v_log):
+            _last_scrolled_log = list(nes.ppu._dbg_v_log)
 
         # Optional: dump nametable once for debugging
         if dump_nametable and frame_count in dump_frames:
@@ -215,3 +225,21 @@ if __name__ == "__main__":
         pygame.display.set_caption(f"NES Emulator - {clock.get_fps():.2f} FPS")
 
     pygame.quit()
+
+    # --- Scroll debug dump ---
+    log = list(nes.ppu._dbg_v_log)
+    # If last frame had no scroll (e.g. game over), use saved scrolled frame
+    if not any(e[3] != 0 or e[2] != 0 for e in log) and _last_scrolled_log:
+        log = _last_scrolled_log
+        print("\n(использую последний кадр где был скролл, а не самый последний)")
+    hscroll = nes.cpu.memory[0x073F] if len(nes.cpu.memory) > 0x073F else 0
+    print(f"\n=== Last frame scroll log (HorizontalScroll=$073F={hscroll}) ===")
+    print(f"{'SL':>3} {'v':>6} {'coarse_x':>9} {'fine_x':>7} {'fine_y':>7} {'nt':>3}")
+    print("-" * 47)
+    prev_cx = None
+    for entry in log:
+        line, v, fine_x, coarse_x, fine_y = entry
+        nt = (v >> 10) & 3
+        marker = " <<< SPLIT" if (prev_cx is not None and coarse_x != prev_cx) else ""
+        print(f"{line:>3}  {v:04X}    {coarse_x:>5}      {fine_x:>3}      {fine_y:>3}   {nt:>2}{marker}")
+        prev_cx = coarse_x

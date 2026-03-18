@@ -21,7 +21,11 @@ cdef class PPU:
     
     # Scroll
     cdef uint8_t scroll_x, scroll_y
-    
+
+    # fine_x snapshotted at start of each scanline (cycle 0),
+    # so mid-scanline $2005 writes don't bleed into the current line
+    cdef uint8_t snap_fine_x
+
     # Buffered read
     cdef uint8_t read_buffer
     
@@ -29,6 +33,7 @@ cdef class PPU:
     cdef uint8_t[:] scanline_oam
     cdef int sprite_count
     cdef uint8_t sprite0_hit
+    cdef int sprite0_hit_x
     cdef uint8_t[:] scanline_bg
     cdef int sprite0_in_scanline
     cdef bint _debug_force_palette
@@ -40,6 +45,10 @@ cdef class PPU:
     cdef public object cpu
     cdef public int force_bg_pattern
     cdef public int force_sprite_pattern
+
+    # Debug: log v and fine_x for each scanline (first frame only)
+    cdef public object _dbg_v_log   # list of (scanline, v, fine_x) tuples
+    cdef public bint _dbg_log_enabled
 
     def __init__(self, mirroring=0):
         self.scanline = 0
@@ -64,11 +73,13 @@ cdef class PPU:
         
         self.scroll_x = 0
         self.scroll_y = 0
+        self.snap_fine_x = 0
         self.read_buffer = 0
         
         self.scanline_oam = np.zeros(32, dtype=np.uint8)
         self.sprite_count = 0
         self.sprite0_hit = 0
+        self.sprite0_hit_x = -1
         self.nes_palette = np.array([
             [124,124,124],[0,0,252],[0,0,188],[68,40,188],[148,0,132],[168,0,32],[168,16,0],[136,20,0],
             [80,48,0],[0,120,0],[0,104,0],[0,88,0],[0,64,88],[0,0,0],[0,0,0],[0,0,0],
@@ -85,6 +96,8 @@ cdef class PPU:
         self._debug_force_palette = False
         self.force_bg_pattern = -1
         self.force_sprite_pattern = -1
+        self._dbg_v_log = []
+        self._dbg_log_enabled = False
 
     cpdef public uint16_t debug_get_v(self):
         return self.v
@@ -157,22 +170,31 @@ cdef class PPU:
 
     cdef void _step_core(self):
         # Все объявления в самом начале
-        cdef int spr0_y, spr0_x
         cdef bint rendering_enabled
+        cdef int i
         
         self.cycle += 1
-        
         rendering_enabled = (self.mask & 0x18) != 0
-        
-        # Sprite 0 Hit
-        if rendering_enabled and not self.sprite0_hit:
-            spr0_y = self.oam_data[0] + 1
-            spr0_x = self.oam_data[3]
-            
-            if spr0_y <= self.scanline < spr0_y + 8:
-                if self.cycle == spr0_x + 2: 
-                    self.sprite0_hit = 1
-                    self.status |= 0x40
+
+        # Snapshot fine_x at the very first cycle of each scanline
+        # so that a mid-scanline $2005 write doesn't affect the current line.
+        if self.cycle == 1:
+            self.snap_fine_x = self.fine_x
+            if 0 <= self.scanline < 240:
+                if rendering_enabled:
+                    self.render_scanline(self.scanline)
+                    self.sprite0_hit_x = self._find_sprite0_hit_x(self.scanline)
+                else:
+                    self.sprite0_hit_x = -1
+                    # Clear bg scanline if rendering is disabled to avoid ghosting in sprites
+                    for i in range(256):
+                        self.scanline_bg[i] = 0
+
+        # Sprite 0 hit timing: set status when the first overlapping pixel is reached.
+        if rendering_enabled and not self.sprite0_hit and self.sprite0_hit_x >= 0:
+            if self.cycle == self.sprite0_hit_x + 2:
+                self.sprite0_hit = 1
+                self.status |= 0x40
 
         # Timings
         if self.cycle >= 341:
@@ -186,8 +208,6 @@ cdef class PPU:
                 self.vblank_flag = 0
                 self.status &= ~0xE0 
                 self.sprite0_hit = 0
-                if rendering_enabled:
-                    self.copy_y()
             
             elif self.scanline >= 262:
                 self.scanline = 0
@@ -205,11 +225,7 @@ cdef class PPU:
         if 0 <= self.scanline < 240:
             if self.cycle == 256:
                 if rendering_enabled:
-                    self.render_scanline(self.scanline)
                     self.increment_scroll_y()
-                else:
-                    # Clear bg scanline if rendering is disabled to avoid ghosting in sprites
-                    for i in range(256): self.scanline_bg[i] = 0
             
             if self.cycle == 257:
                 if rendering_enabled:
@@ -337,11 +353,11 @@ cdef class PPU:
 
         if self.chr_rom is None:
             return
-        # Объявляем переменные
-        cdef int base_nt, base_x, base_y
-        cdef int global_x, global_y, x_in_nt, y_in_nt
-        cdef int x, pixel_in_tile_x
-        cdef int current_nt_x, current_nt_y, tile_x, tile_y, current_nt
+        # Variable declarations
+        cdef int fine_y, coarse_y_v, nt_select, coarse_x_start, fine_x_start
+        cdef int nt_x_base, nt_y_base
+        cdef int x, pixel_total, tile_x_offset, pixel_in_tile_x, prev_tile_x_offset
+        cdef int current_nt_x, current_nt_y, tile_x, tile_y, current_nt, coarse_x_abs
         cdef int nt_addr, tile_index, tile_offset
         cdef int attr_addr, attr_byte, shift, palette_index
         cdef uint8_t low, high, bit0, bit1, pix
@@ -357,15 +373,21 @@ cdef class PPU:
         cdef uint8_t[:] chr_rom = self.chr_rom
         cdef int chr_len = chr_rom.shape[0]
 
-        # Инициализация
-        base_nt = self.ctrl & 0x03
-        base_x = (base_nt & 1) * 256
-        base_y = ((base_nt >> 1) & 1) * 240
-        global_y = base_y + self.scroll_y + line
-        current_nt_y = (global_y // 240) & 1
-        y_in_nt = global_y % 240
-        tile_y = y_in_nt >> 3
-        fine_y = y_in_nt & 0x07
+        # Decode the v register for this scanline's exact scroll state.
+        # Layout: fine_y(14-12) | nt_y(11) | nt_x(10) | coarse_y(9-5) | coarse_x(4-0)
+        fine_y        = (self.v >> 12) & 7
+        coarse_y_v    = (self.v >> 5)  & 31
+        nt_select     = (self.v >> 10) & 3
+        coarse_x_start = self.v & 31
+        fine_x_start  = self.snap_fine_x   # snapshotted at cycle 1 of this scanline
+
+        if self._dbg_log_enabled and line < 35:
+            self._dbg_v_log.append((line, self.v, self.snap_fine_x, coarse_x_start, fine_y))
+
+        nt_x_base = nt_select & 1
+        nt_y_base = (nt_select >> 1) & 1
+        tile_y    = coarse_y_v           # tile row in the nametable
+
         if self.force_bg_pattern in (0, 1):
             bg_pattern_base = 0x1000 if self.force_bg_pattern == 1 else 0x0000
         else:
@@ -379,38 +401,49 @@ cdef class PPU:
         pal0 = palette_ram[0] & 0x3F
 
         tile_valid = False
+        low = 0
+        high = 0
+        palette_index = 0
+        prev_tile_x_offset = -1
 
         for x in range(256):
-            global_x = base_x + self.scroll_x + x
-            current_nt_x = (global_x >> 8) & 1
-            x_in_nt = global_x & 0xFF
-            pixel_in_tile_x = x_in_nt & 7
-            if x == 0 or pixel_in_tile_x == 0:
-                tile_x = x_in_nt >> 3
-                current_nt = (current_nt_y * 2) + current_nt_x
+            # Total pixel offset from the starting tile boundary (including fine X)
+            pixel_total     = fine_x_start + x
+            tile_x_offset   = pixel_total >> 3   # tiles elapsed since coarse_x_start
+            pixel_in_tile_x = pixel_total & 7
+
+            if tile_x_offset != prev_tile_x_offset:
+                prev_tile_x_offset = tile_x_offset
+
+                # Absolute coarse X, wrapping at 32 and flipping horizontal NT
+                coarse_x_abs  = coarse_x_start + tile_x_offset
+                tile_x        = coarse_x_abs & 31
+                current_nt_x  = nt_x_base ^ ((coarse_x_abs >> 5) & 1)
+                current_nt_y  = nt_y_base
+                current_nt    = (current_nt_y * 2) + current_nt_x
 
                 nt_addr = self.get_vram_mirror(0x2000 + (current_nt * 0x400) + tile_y * 32 + tile_x)
-                tile_index = vram[nt_addr]
+                tile_index  = vram[nt_addr]
                 tile_offset = bg_pattern_base + tile_index * 16
 
                 if tile_offset + 16 > chr_len:
                     tile_valid = False
                 else:
                     tile_valid = True
-                    low = chr_rom[tile_offset + fine_y]
+                    low  = chr_rom[tile_offset + fine_y]
                     high = chr_rom[tile_offset + 8 + fine_y]
 
                 attr_addr = self.get_vram_mirror(
                     0x2000 + (current_nt * 0x400) + 0x3C0 + ((tile_y >> 2) * 8) + (tile_x >> 2)
                 )
-                attr_byte = vram[attr_addr]
-                shift = ((tile_y & 0x02) << 1) | (tile_x & 0x02)
+                attr_byte     = vram[attr_addr]
+                shift         = ((tile_y & 0x02) << 1) | (tile_x & 0x02)
                 palette_index = (attr_byte >> shift) & 0x03
 
             if tile_valid:
-                bit0 = (low >> (7 - pixel_in_tile_x)) & 1
+                bit0 = (low  >> (7 - pixel_in_tile_x)) & 1
                 bit1 = (high >> (7 - pixel_in_tile_x)) & 1
-                pix = (bit1 << 1) | bit0
+                pix  = (bit1 << 1) | bit0
             else:
                 pix = 0
 
@@ -426,6 +459,78 @@ cdef class PPU:
             frame_buffer[line, x, 0] = nes_palette[pal_idx, 0]
             frame_buffer[line, x, 1] = nes_palette[pal_idx, 1]
             frame_buffer[line, x, 2] = nes_palette[pal_idx, 2]
+
+    cdef int _find_sprite0_hit_x(self, int line):
+        cdef int y, x, height, tile_index, attr
+        cdef bint flip_x, flip_y
+        cdef int scanline_y, tile_row, tile_offset, bank, base_index
+        cdef int sprite_table_base
+        cdef uint8_t low, high, bit0, bit1, pix
+        cdef int col, sx
+
+        if self.chr_rom is None:
+            return -1
+        if not (self.mask & 0x18):
+            return -1
+
+        y = int(self.oam_data[0]) + 1
+        x = int(self.oam_data[3])
+        height = 16 if (self.ctrl & 0x20) else 8
+        if line < y or line >= y + height:
+            return -1
+
+        tile_index = int(self.oam_data[1])
+        attr = int(self.oam_data[2])
+        flip_x = (attr & 0x40) != 0
+        flip_y = (attr & 0x80) != 0
+
+        scanline_y = line - y
+        if flip_y:
+            scanline_y = (height - 1) - scanline_y
+
+        if self.force_sprite_pattern in (0, 1):
+            sprite_table_base = 0x1000 if self.force_sprite_pattern == 1 else 0x0000
+        else:
+            sprite_table_base = 0x1000 if (self.ctrl & 0x08) else 0x0000
+
+        if height == 8:
+            tile_row = scanline_y
+            tile_offset = sprite_table_base + tile_index * 16
+        else:
+            bank = (tile_index & 1) * 0x1000
+            base_index = tile_index & 0xFE
+            if scanline_y < 8:
+                tile_row = scanline_y
+                tile_offset = bank + base_index * 16
+            else:
+                tile_row = scanline_y - 8
+                tile_offset = bank + (base_index + 1) * 16
+
+        if tile_offset + 8 >= len(self.chr_rom):
+            return -1
+
+        low = self.chr_rom[tile_offset + tile_row]
+        high = self.chr_rom[tile_offset + 8 + tile_row]
+
+        for col in range(8):
+            sx = x + (7 - col if flip_x else col)
+            if sx < 0 or sx >= 256:
+                continue
+            if sx == 255:
+                continue
+            if sx < 8 and (self.mask & 0x06) != 0x06:
+                continue
+
+            bit0 = (low >> (7 - col)) & 1
+            bit1 = (high >> (7 - col)) & 1
+            pix = (bit1 << 1) | bit0
+            if pix == 0:
+                continue
+            if int(self.scanline_bg[sx]) == 0:
+                continue
+            return sx
+
+        return -1
 
     cpdef public void sprite_evaluate(self):
         cdef int oam_idx, y, start, j
@@ -523,9 +628,6 @@ cdef class PPU:
                     
                 bg_pix = int(self.scanline_bg[sx])
                 
-                if self.sprite0_in_scanline == i and bg_pix != 0:
-                    self.sprite0_hit = 1
-                    
                 if priority_front or bg_pix == 0:
                     pal_idx = int(self.palette_ram[palette_index * 4 + pix]) & 0x3F
                     self.frame_buffer[self.scanline, sx] = self.nes_palette[pal_idx]
