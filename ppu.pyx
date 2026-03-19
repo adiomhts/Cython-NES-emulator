@@ -1,10 +1,14 @@
-# ppu.pyx
 import numpy as np
 cimport numpy as cnp
 from libc.stdint cimport uint8_t, uint16_t
 
 cdef class PPU:
-    # Core state
+    """NES PPU core: registers, VRAM mirroring, and scanline-based rendering.
+
+    Owns rendering buffers, PPU registers, OAM state, and timing counters used
+    to emulate visible scanlines and vblank behavior.
+    """
+
     cdef int scanline, cycle
     cdef public object frame_buffer
     cdef public uint8_t[:] oam_data
@@ -12,24 +16,17 @@ cdef class PPU:
     cdef public uint8_t[:] palette_ram
     cdef uint8_t mirroring, vblank_flag
     
-    # Registers
     cdef public uint8_t ctrl, mask, status, oam_addr, fine_x
     
-    # VRAM addresses
     cdef uint16_t v, t
     cdef uint8_t write_toggle
     
-    # Scroll
     cdef uint8_t scroll_x, scroll_y
 
-    # fine_x snapshotted at start of each scanline (cycle 0),
-    # so mid-scanline $2005 writes don't bleed into the current line
     cdef uint8_t snap_fine_x
 
-    # Buffered read
     cdef uint8_t read_buffer
     
-    # Sprite evaluation
     cdef uint8_t[:] scanline_oam
     cdef int sprite_count
     cdef uint8_t sprite0_hit
@@ -37,13 +34,24 @@ cdef class PPU:
     cdef uint8_t[:] scanline_bg
     cdef int sprite0_in_scanline
     
-    # NES palette
     cdef int[:, :] nes_palette
     
     cdef public object chr_rom
     cdef public object cpu
 
     def __init__(self, mirroring=0):
+        """Initialize PPU state and memory arrays.
+
+        Args:
+            mirroring: Nametable mirroring mode (`0=horizontal`, `1=vertical`).
+
+        Returns:
+            None.
+
+        Side Effects:
+            Allocates framebuffer, OAM/VRAM/palette storage, and resets PPU
+            register/timing state.
+        """
         self.scanline = 0
         self.cycle = 0
         self.frame_buffer = np.zeros((240, 256, 3), dtype=np.uint8)
@@ -87,7 +95,6 @@ cdef class PPU:
         self.scanline_bg = np.zeros(256, dtype=np.uint8)
         self.sprite0_in_scanline = -1
 
-    # === Helpers ===
     
     cdef void increment_v(self):
         self.v += 32 if (self.ctrl & 0x04) else 1
@@ -116,7 +123,6 @@ cdef class PPU:
             self.v += 1
 
     cdef void increment_v_2007(self):
-        # NESdev: during rendering, PPUDATA access increments coarse X and Y together.
         if (self.mask & 0x18) != 0 and ((0 <= self.scanline < 240) or self.scanline == 261):
             self.increment_scroll_x()
             self.increment_scroll_y()
@@ -130,7 +136,6 @@ cdef class PPU:
         self.v = (self.v & 0x841F) | (self.t & 0x7BE0)
 
     cdef int get_vram_mirror(self, int addr):
-        # Объявления в начале
         cdef int pal_addr, clean_addr, table, offset, bank
         
         addr = addr & 0x3FFF 
@@ -157,33 +162,26 @@ cdef class PPU:
             return bank * 0x400 + offset
         return 0
 
-    # === STEP ===
 
     cdef void _step_core(self):
-        # Все объявления в самом начале
         cdef bint rendering_enabled
         cdef int i, pal_idx_line
         
         self.cycle += 1
         rendering_enabled = (self.mask & 0x18) != 0
 
-        # Snapshot fine_x at the very first cycle of each scanline
-        # so that a mid-scanline $2005 write doesn't affect the current line.
         if self.cycle == 1:
             self.snap_fine_x = self.fine_x
             if 0 <= self.scanline < 240:
                 if rendering_enabled and (self.mask & 0x08):
                     self.render_scanline(self.scanline)
                 else:
-                    # Fill line with backdrop color so previous-frame pixels do not leak
-                    # when background rendering is disabled.
                     pal_idx_line = self.palette_ram[0] & 0x3F
                     for i in range(256):
                         self.frame_buffer[self.scanline, i, 0] = self.nes_palette[pal_idx_line, 0]
                         self.frame_buffer[self.scanline, i, 1] = self.nes_palette[pal_idx_line, 1]
                         self.frame_buffer[self.scanline, i, 2] = self.nes_palette[pal_idx_line, 2]
 
-                    # Clear bg coverage map to keep sprite/background priority correct.
                     for i in range(256):
                         self.scanline_bg[i] = 0
 
@@ -192,13 +190,11 @@ cdef class PPU:
                 else:
                     self.sprite0_hit_x = -1
 
-        # Sprite 0 hit timing: set status when the first overlapping pixel is reached.
         if rendering_enabled and not self.sprite0_hit and self.sprite0_hit_x >= 0:
             if self.cycle == self.sprite0_hit_x + 2:
                 self.sprite0_hit = 1
                 self.status |= 0x40
 
-        # Timings
         if self.cycle >= 341:
             self.cycle = 0
             self.scanline += 1
@@ -214,7 +210,6 @@ cdef class PPU:
             elif self.scanline >= 262:
                 self.scanline = 0
         
-        # Pre-render line (261)
         if self.scanline == 261 and rendering_enabled:
             if self.cycle == 256:
                 self.increment_scroll_y()
@@ -223,7 +218,6 @@ cdef class PPU:
             if self.cycle >= 280 and self.cycle <= 304:
                 self.copy_y()
 
-        # Visible lines
         if 0 <= self.scanline < 240:
             if self.cycle == 256:
                 if rendering_enabled:
@@ -236,14 +230,49 @@ cdef class PPU:
                     self.sprite_render()
 
     cpdef public void step(self):
+        """Advance PPU timing by one step.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            May change scanline/cycle counters, vblank flags, and render output
+            depending on current timing position.
+        """
         self._step_core()
 
     cpdef public void step_many(self, int steps):
+        """Advance PPU by multiple timing steps.
+
+        Args:
+            steps: Number of internal `_step_core` iterations.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Same state effects as repeated `step()` calls.
+        """
         cdef int i
         for i in range(steps):
             self._step_core()
 
     cpdef public void trigger_vblank(self):
+        """Enter vblank state and optionally trigger NMI.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Sets vblank status bit and can queue CPU NMI when enabled by
+            `PPUCTRL` bit 7.
+        """
         self.vblank_flag = 1
         self.status |= 0x80
         try:
@@ -252,9 +281,21 @@ cdef class PPU:
         except Exception:
             pass
 
-    # === REGISTERS ===
 
     cpdef public void write_register(self, uint16_t reg, uint8_t value):
+        """Handle CPU write to PPU register space.
+
+        Args:
+            reg: CPU-visible PPU register address (including mirrors).
+            value: Byte value to write.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Updates PPU registers and/or memory, scroll/address latches, OAM,
+            and VRAM increment behavior according to target register.
+        """
         cdef int addr, phys, pal_addr
         reg = reg & 0x2007
         
@@ -299,7 +340,6 @@ cdef class PPU:
         elif reg == 0x2007: 
             addr = self.v & 0x3FFF
             if addr < 0x2000:
-                # CHR-RAM write (only meaningful when CHR is RAM, ignored for CHR-ROM)
                 if self.chr_rom is not None and addr < len(self.chr_rom):
                     self.chr_rom[addr] = value
             elif addr < 0x3F00:
@@ -311,6 +351,19 @@ cdef class PPU:
             self.increment_v_2007()
 
     cpdef public uint8_t read_register(self, uint16_t reg):
+        """Handle CPU read from PPU register space.
+
+        Args:
+            reg: CPU-visible PPU register address (including mirrors).
+
+        Returns:
+            uint8_t: Register value with correct buffered-read semantics for
+            `$2007` and status behavior for `$2002`.
+
+        Side Effects:
+            Can clear vblank status on `$2002`, mutate read buffer, and advance
+            internal VRAM address.
+        """
         cdef int addr, pal_addr
         cdef uint8_t ret
         cdef uint8_t[:] chr_view_r
@@ -328,7 +381,6 @@ cdef class PPU:
         elif reg == 0x2007: 
             addr = self.v & 0x3FFF
             if addr < 0x2000:
-                # CHR-ROM/RAM space — buffered read
                 ret = self.read_buffer
                 if self.chr_rom is not None and addr < len(self.chr_rom):
                     chr_view_r = self.chr_rom
@@ -336,26 +388,34 @@ cdef class PPU:
                 else:
                     self.read_buffer = 0
             elif addr < 0x3F00:
-                # Nametable / attribute table space — buffered read
                 ret = self.read_buffer
                 self.read_buffer = self.vram[self.get_vram_mirror(addr)]
             else:
-                # Palette space — no buffer delay
                 pal_addr = self.get_vram_mirror(addr)
                 ret = self.palette_ram[pal_addr]
             self.increment_v_2007()
             return ret
         return 0
 
-    # === RENDERING ===
 
     cpdef public void render_scanline(self, int line):
+        """Render background pixels for one scanline.
+
+        Args:
+            line: Visible scanline index in framebuffer (`0-239`).
+
+        Returns:
+            None.
+
+        Side Effects:
+            Writes RGB pixels into framebuffer row and updates per-pixel
+            background coverage map used for sprite priority/hit logic.
+        """
         if not (self.mask & 0x08):
             return
 
         if self.chr_rom is None:
             return
-        # Variable declarations
         cdef int fine_y, coarse_y_v, nt_select, coarse_x_start, fine_x_start
         cdef int nt_x_base, nt_y_base
         cdef int x, pixel_total, tile_x_offset, pixel_in_tile_x, prev_tile_x_offset
@@ -375,17 +435,15 @@ cdef class PPU:
         cdef uint8_t[:] chr_rom = self.chr_rom
         cdef int chr_len = chr_rom.shape[0]
 
-        # Decode the v register for this scanline's exact scroll state.
-        # Layout: fine_y(14-12) | nt_y(11) | nt_x(10) | coarse_y(9-5) | coarse_x(4-0)
         fine_y        = (self.v >> 12) & 7
         coarse_y_v    = (self.v >> 5)  & 31
         nt_select     = (self.v >> 10) & 3
         coarse_x_start = self.v & 31
-        fine_x_start  = self.snap_fine_x   # snapshotted at cycle 1 of this scanline
+        fine_x_start  = self.snap_fine_x
 
         nt_x_base = nt_select & 1
         nt_y_base = (nt_select >> 1) & 1
-        tile_y    = coarse_y_v           # tile row in the nametable
+        tile_y    = coarse_y_v
 
         bg_pattern_base = 0x1000 if (self.ctrl & 0x10) else 0x0000
 
@@ -403,15 +461,13 @@ cdef class PPU:
         prev_tile_x_offset = -1
 
         for x in range(256):
-            # Total pixel offset from the starting tile boundary (including fine X)
             pixel_total     = fine_x_start + x
-            tile_x_offset   = pixel_total >> 3   # tiles elapsed since coarse_x_start
+            tile_x_offset   = pixel_total >> 3
             pixel_in_tile_x = pixel_total & 7
 
             if tile_x_offset != prev_tile_x_offset:
                 prev_tile_x_offset = tile_x_offset
 
-                # Absolute coarse X, wrapping at 32 and flipping horizontal NT
                 coarse_x_abs  = coarse_x_start + tile_x_offset
                 tile_x        = coarse_x_abs & 31
                 current_nt_x  = nt_x_base ^ ((coarse_x_abs >> 5) & 1)
@@ -443,7 +499,6 @@ cdef class PPU:
             else:
                 pix = 0
 
-            # PPUMASK bit 1: hide background in leftmost 8 pixels when clear.
             if x < 8 and not (self.mask & 0x02):
                 pix = 0
 
@@ -527,6 +582,18 @@ cdef class PPU:
         return -1
 
     cpdef public void sprite_evaluate(self):
+        """Select up to 8 visible sprites for current scanline.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Populates scanline sprite buffer, updates sprite count, tracks sprite
+            0 presence, and sets overflow status when applicable.
+        """
         cdef int oam_idx, y, start, j
         cdef int height = 16 if (self.ctrl & 0x20) else 8
         cdef int found = 0
@@ -553,6 +620,18 @@ cdef class PPU:
             self.status |= 0x20
 
     cpdef public void sprite_render(self):
+        """Composite sprite pixels for current scanline.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Writes sprite RGB values into framebuffer according to transparency,
+            priority, clipping, and palette rules.
+        """
         if self.chr_rom is None:
             return
         if not (self.mask & 0x10):
@@ -626,6 +705,17 @@ cdef class PPU:
                     self.frame_buffer[self.scanline, sx] = self.nes_palette[pal_idx]
 
     cpdef public void perform_dma(self, uint8_t[:] page):
+        """Copy one 256-byte page into OAM (DMA behavior).
+
+        Args:
+            page: 256-byte source buffer prepared by CPU bus reads.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Overwrites OAM contents starting at current OAM address.
+        """
         cdef int i
         for i in range(256):
             self.oam_data[self.oam_addr] = page[i]

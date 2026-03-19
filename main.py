@@ -2,8 +2,13 @@ import pygame
 import sys
 from nes import NES
 
-# Карта кнопок клавиатуры на кнопки NES
-# NES: A, B, Select, Start, Up, Down, Left, Right
+"""CLI entrypoint for launching the NES emulator with a ROM path.
+
+This module parses command-line arguments, creates the emulator instance,
+translates host keyboard input to NES controller buttons, and drives the
+frame loop at approximately 60 FPS.
+"""
+
 KEY_MAP = {
     'A': pygame.K_z,
     'B': pygame.K_x,
@@ -15,7 +20,23 @@ KEY_MAP = {
     'RIGHT': pygame.K_RIGHT
 }
 
-if __name__ == "__main__":
+def main():
+    """Run the interactive emulator loop.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Side Effects:
+        Initializes and uses pygame subsystems, creates a window, reads user
+        input events, updates window caption with measured FPS, and advances
+        emulation until quit.
+
+    Raises:
+        SystemExit: If ROM path argument is not provided.
+    """
     if len(sys.argv) < 2:
         print("Usage: python main.py <path_to_rom>")
         sys.exit(1)
@@ -23,14 +44,12 @@ if __name__ == "__main__":
     rom_path = sys.argv[1]
     nes = NES(rom_path)
     
-    # Часы для ограничения FPS
     clock = pygame.time.Clock()
     running = True
 
     print("Emulator started. Controls: Arrows=Move, Z=A, X=B, Enter=Start, RShift=Select")
 
     while running:
-        # 1. ОБРАБОТКА СОБЫТИЙ (Важно, чтобы окно не висло!)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -38,11 +57,8 @@ if __name__ == "__main__":
                 if event.key == pygame.K_ESCAPE:
                     running = False
 
-        # 2. Считывание управления
         keys = pygame.key.get_pressed()
         
-        # Формируем список состояний кнопок для контроллера
-        # Порядок в Controller.pyx: [A, B, Select, Start, Up, Down, Left, Right]
         input_state = [
             keys[KEY_MAP['A']],
             keys[KEY_MAP['B']],
@@ -54,18 +70,17 @@ if __name__ == "__main__":
             keys[KEY_MAP['RIGHT']]
         ]
         
-        # Передаем в эмулятор
         if hasattr(nes, 'controller') and nes.controller:
             nes.controller.update(input_state)
 
-        # 3. Эмуляция кадра
         nes.run_frame()
         
-        # 4. Ограничение скорости (60 FPS)
-        # Если убрать это, игра будет работать слишком быстро на мощном ПК
         clock.tick(60)
         
-        # Вывод реального FPS в заголовок (для отладки)
         pygame.display.set_caption(f"NES Emulator - {clock.get_fps():.2f} FPS")
 
     pygame.quit()
+
+
+if __name__ == "__main__":
+    main()

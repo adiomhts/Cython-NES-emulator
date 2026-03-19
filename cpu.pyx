@@ -1,4 +1,3 @@
-# cpu.pyx
 import numpy as np
 cimport numpy as cnp
 from libc.stdint cimport uint8_t, uint16_t, int8_t
@@ -17,6 +16,12 @@ cdef enum AddressingMode:
     INDIRECTY = 10
 
 cdef class CPUFlags:
+    """Container for 6502 processor status flags.
+
+    Stores carry/zero/interrupt/decimal/break/overflow/negative bits used by
+    instruction handlers.
+    """
+
     cdef bint negative
     cdef bint overflow     
     cdef bint break_source 
@@ -26,6 +31,17 @@ cdef class CPUFlags:
     cdef bint carry     
 
     def __init__(self):
+        """Initialize all status flags to cleared state.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Sets all internal status-flag booleans to `False`.
+        """
         self.negative = False
         self.overflow = False
         self.break_source = False
@@ -39,6 +55,8 @@ cdef struct OpcodeDef:
     int cycles
     bint page_boundary
     bint rmw
+
+cdef class CPU6502
 
 cdef void (*opcode_table[256])(CPU6502)  
 cdef OpcodeDef opcode_defs[256]
@@ -219,12 +237,12 @@ cdef void op_JSR(CPU6502 cpu):
     cpu.PC = cpu.next_word()
 
 cdef void op_RTI(CPU6502 cpu):
-    cpu.next_byte()  # Dummy fetch
+    cpu.next_byte()
     cpu.set_P(cpu.pop())
     cpu.PC = cpu.pop_word()
 
 cdef void op_RTS(CPU6502 cpu):
-    cpu.next_byte()  # Dummy fetch
+    cpu.next_byte()
     cpu.PC = cpu.pop_word() + 1
 
 cdef void op_INY(CPU6502 cpu):
@@ -276,7 +294,7 @@ cdef void op_TXS(CPU6502 cpu):
     cpu.SP = cpu.X
 
 cdef void op_PHP(CPU6502 cpu):
-    cpu.push(cpu.get_P() | 0x10)  # BreakSourceBit
+    cpu.push(cpu.get_P() | 0x10)
 
 cdef void op_PLP(CPU6502 cpu):
     cpu.set_P(cpu.pop() & ~0x10)
@@ -305,17 +323,13 @@ cdef void op_JMP(CPU6502 cpu):
     cdef uint16_t off
     cdef uint16_t addr_low, addr_high
     
-    if cpu.current_instruction == 0x4C: # Absolute
+    if cpu.current_instruction == 0x4C:
         cpu.PC = cpu.next_word()
-    elif cpu.current_instruction == 0x6C: # Indirect
+    elif cpu.current_instruction == 0x6C:
         off = cpu.next_word()
         
-        # Читаем младший байт адреса перехода
         addr_low = cpu.read_byte(off)
         
-        # Читаем старший байт с эмуляцией аппаратного бага 6502:
-        # Если указатель находится на границе страницы (например $30FF),
-        # то старший байт берется не из $3100, а из $3000 (заворот внутри страницы).
         if (off & 0x00FF) == 0x00FF:
             addr_high = cpu.read_byte(off & 0xFF00)
         else:
@@ -429,9 +443,9 @@ cdef void op_ADC(CPU6502 cpu):
     cpu.F.negative = (cpu.A & 0x80) > 0
 
 cdef void op_BRK(CPU6502 cpu):
-    cpu.next_byte()           # consume padding byte; PC now = BRK+2
-    cpu.push_word(cpu.PC)     # push return address (PC+2) hi then lo
-    cpu.push(cpu.get_P() | 0x10)  # push P with B flag set
+    cpu.next_byte()
+    cpu.push_word(cpu.PC)
+    cpu.push(cpu.get_P() | 0x10)
     cpu.F.interrupts_disabled = True
     cpu.PC = cpu.read_word(0xFFFE)
 
@@ -536,6 +550,12 @@ cdef void op_ATX(CPU6502 cpu):
     cpu.X = cpu.A
 
 cdef class CPU6502:
+    """Ricoh 2A03 CPU core with NES bus mapping and interrupt handling.
+
+    Implements instruction fetch/decode/execute, interrupt sequencing, and
+    memory-mapped IO dispatch to PPU/APU/controller/cartridge.
+    """
+
     cdef uint8_t A
     cdef uint8_t X
     cdef uint8_t Y
@@ -558,6 +578,18 @@ cdef class CPU6502:
     cdef int _debug_instr_limit
 
     def __init__(self):
+        """Create CPU state, opcode tables, and interrupt vectors.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Allocates CPU RAM/memory arrays, initializes status/register fields,
+            and prepares opcode metadata used by execution loop.
+        """
         self.A = <uint8_t>0x00
         self.X = <uint8_t>0x00
         self.Y = <uint8_t>0x00
@@ -572,17 +604,27 @@ cdef class CPU6502:
         self.current_memory_address = 0
         self.has_current_address = False
         init_opcodes()
-        self.interrupt_vectors[0] = 0xFFFA  # NMI
-        self.interrupt_vectors[1] = 0xFFFE  # IRQ
-        self.interrupt_vectors[2] = 0xFFFC  # RESET
+        self.interrupt_vectors[0] = 0xFFFA
+        self.interrupt_vectors[1] = 0xFFFE
+        self.interrupt_vectors[2] = 0xFFFC
         self.interrupts[0] = False
         self.interrupts[1] = False
-        # Debug: how many instructions we've printed
         self._debug_instr_printed = 0
         self._debug_instr_limit = 50
-        # self.reset()
 
     cpdef public void reset(self):
+        """Reset CPU core state.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Loads PC from RESET vector, resets stack pointer and cycle counter,
+            and forces interrupt-disable flag.
+        """
         self.PC = self.read_word(self.interrupt_vectors[2])
         self.SP = <uint8_t>0xFD
         self.F.interrupts_disabled = True
@@ -594,47 +636,37 @@ cdef class CPU6502:
         return opcode
 
     cdef uint8_t read_byte(self, uint16_t address):
-        # 1. RAM
         if 0x0000 <= address <= 0x1FFF:
             return self.ram[address & 0x07FF]
             
-        # 2. PPU
         if 0x2000 <= address <= 0x3FFF:
             reg = 0x2000 + (address % 8)
             return self.ppu.read_register(reg)
             
-        # 3. APU / IO - ЭТОГО НЕ БЫЛО!
         if 0x4000 <= address <= 0x401F:
             return self.read_io_register(address)
             
-        # 4. Cartridge (PRG-ROM)
         if 0x8000 <= address <= 0xFFFF:
             return self.cartridge.mapper_instance.read_prg(address)
             
-        # 5. Остальная память
         return self.memory[address]
 
     cdef void write_byte(self, uint16_t address, uint8_t value):
-        # 1. PPU Registers ($2000-$3FFF)
         if 0x2000 <= address <= 0x3FFF:
             reg = 0x2000 + (address % 8)
             self.ppu.write_register(reg, value)
             return
             
-        # 2. APU / IO Registers ($4000-$401F) - ЭТОГО НЕ БЫЛО!
         if 0x4000 <= address <= 0x401F:
             self.write_io_register(address, value)
             return
 
-        # 3. RAM ($0000-$1FFF)
         if 0x0000 <= address <= 0x1FFF:
             self.ram[address & 0x07FF] = value
             
-        # 4. Cartridge / Mapper (PRG-ROM обычно Read-Only, но мапперы перехватывают запись)
         elif address >= 0x8000:
             self.cartridge.mapper_instance.write_prg(address, value)
             
-        # 5. Остальная память
         else:
             self.memory[address] = value
 
@@ -725,7 +757,7 @@ cdef class CPU6502:
                 self.cycles += 1
             addr += self.Y
         else:
-            addr = 0  # Для DIRECT и NONE адрес не нужен
+            addr = 0
         return addr
 
     cdef uint8_t address_read(self):
@@ -757,66 +789,59 @@ cdef class CPU6502:
         self.has_current_address = False
         op_func = opcode_table[opcode]
         if op_func != NULL:
-            # Debug print first few instructions
-            # try:
-            #     if self._debug_instr_printed < self._debug_instr_limit:
-            #         print(f"CPU exec PC={self.PC:04X} opcode={opcode:02X}")
-            #         self._debug_instr_printed += 1
-            # except Exception:
-            #     pass
             self.cycles += opcode_defs[opcode].cycles
             op_func(self)
         else:
-            # print(f"Warning: Unsupported opcode {opcode:02x} at PC={self.PC:04x}")
-            # Choose to skip, halt, or treat as NOP:
-            # For now, treat as NOP (no operation)
             return
 
-    cpdef public void trigger_interrupt(self, int type):  # type: 0=NMI, 1=IRQ, 2=RESET
+    cpdef public void trigger_interrupt(self, int type):
+        """Queue an interrupt request.
+
+        Args:
+            type: Interrupt kind identifier (`0=NMI`, `1=IRQ`, `2=RESET`).
+
+        Returns:
+            None.
+
+        Side Effects:
+            Marks corresponding interrupt slot as pending when allowed by CPU
+            interrupt mask rules.
+        """
         if not self.F.interrupts_disabled or type == 0:
             self.interrupts[type] = True
             try:
                 itype = {0: 'NMI', 1: 'IRQ', 2: 'RESET'}.get(type, str(type))
-                # print(f"CPU: interrupt requested {itype} (type={type})")
             except Exception:
                 pass
 
     cdef void write_io_register(self, uint16_t reg, uint8_t val):
         cdef int i
         cdef uint16_t dma_start
-        # Используем numpy для создания временного буфера (или можно добавить поле в класс для скорости)
         cdef uint8_t[:] dma_buffer 
 
-        if reg == 0x4014: # OAM DMA
-            # 1. Вычисляем стартовый адрес: val * 256
+        if reg == 0x4014:
             dma_start = <uint16_t>val << 8
             
-            # 2. Создаем буфер для передачи
-            # (Важно: создаем новый массив, чтобы передать memoryview)
             dma_buffer = np.zeros(256, dtype=np.uint8)
             
-            # 3. Читаем 256 байт из памяти CPU (с учетом всех мапперов и RAM)
             for i in range(256):
                 dma_buffer[i] = self.read_byte(dma_start + i)
             
-            # 4. Передаем заполненный буфер в PPU
             if self.ppu is not None:
                 self.ppu.perform_dma(dma_buffer)
             
-            # 5. Эмуляция задержки CPU (513 или 514 циклов)
             self.cycles += 513
             if self.cycles % 2 == 1:
                 self.cycles += 1
                 
-        elif reg == 0x4016: # Controller Strobe
+        elif reg == 0x4016:
             if self.controller is not None:
                 self.controller.write(val)
                 
-        elif reg <= 0x401F: # APU Registers
+        elif reg <= 0x401F:
             if self.apu is not None:
                 self.apu.write(reg, val)
         else:
-            # Другие регистры (не реализованы или не нужны)
             pass
 
 
@@ -827,33 +852,55 @@ cdef class CPU6502:
         return 0
 
     def set_peripherals(self, ppu, apu, controller):
+        """Attach memory-mapped peripherals.
+
+        Args:
+            ppu: PPU instance handling `$2000-$3FFF` register space.
+            apu: APU instance handling `$4000-$4017` register writes.
+            controller: Controller instance handling `$4016` reads/writes.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Stores references used by `read_byte` and `write_byte` dispatch.
+        """
         self.ppu = ppu
         self.apu = apu
         self.controller = controller
 
     def set_cartridge(self, cartridge):
+        """Attach cartridge/mapper backend.
+
+        Args:
+            cartridge: Cartridge object exposing mapper read/write operations.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Stores cartridge reference used by CPU PRG read/write mapping.
+        """
         self.cartridge = cartridge
 
     cpdef public void step(self):
-        # Interrupt handling
+        """Execute one CPU step.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Services pending interrupts or fetches/executes one opcode,
+            mutating registers, memory, and cycle counter.
+        """
         for i in range(2):
             if self.interrupts[i]:
-                # try:
-                #     itype = {0: 'NMI', 1: 'IRQ'}.get(i, str(i))
-                #     print(f"CPU: servicing interrupt {itype} (vector @ {self.interrupt_vectors[i]:04X})")
-                # except Exception:
-                #     pass
                 self.push_word(self.PC)
                 self.push(self.get_P())
                 self.PC = self.read_word(self.interrupt_vectors[i])
-                # try:
-                #     # Dump first bytes at the interrupt handler PC for inspection
-                #     dump = []
-                #     for off in range(16):
-                #         dump.append(f"{self.read_byte((self.PC + off) & 0xFFFF):02X}")
-                #     print(f"CPU: interrupt handler @ {self.PC:04X} bytes: {' '.join(dump)}")
-                # except Exception:
-                #     pass
                 self.F.interrupts_disabled = True
                 self.interrupts[i] = False
                 return

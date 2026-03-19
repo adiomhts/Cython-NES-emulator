@@ -1,4 +1,3 @@
-# mappers.pxd
 from libc.stdint cimport uint8_t, uint16_t
 
 cdef class Mapper0:

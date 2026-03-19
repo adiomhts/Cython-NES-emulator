@@ -4,6 +4,12 @@ from libc.stdint cimport uint8_t, uint16_t
 from mappers cimport Mapper0, Mapper1, Mapper2, Mapper3, Mapper4
 
 cdef class Cartridge:
+    """iNES cartridge parser exposing PRG/CHR buffers and mapper metadata.
+
+    Parses ROM header and payload, prepares PRG/CHR memory, and constructs
+    a mapper implementation used by CPU/PPU memory accesses.
+    """
+
     cdef public object prg_rom
     cdef public object chr_rom
     cdef unsigned char[:] prg_rom_view
@@ -13,6 +19,22 @@ cdef class Cartridge:
     cdef public object mapper_instance
 
     def __init__(self, file_path: str):
+        """Load and parse a `.nes` ROM file.
+
+        Args:
+            file_path: Path to ROM file in iNES format.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Reads file from disk, initializes PRG/CHR arrays and typed views,
+            sets mapper/mirroring metadata, and builds mapper instance.
+
+        Raises:
+            ValueError: If file does not contain a valid iNES signature.
+            OSError: If ROM file cannot be opened/read.
+        """
         with open(file_path, 'rb') as f:
             data = np.frombuffer(f.read(), dtype=np.uint8).copy()
         
@@ -40,7 +62,6 @@ cdef class Cartridge:
             self.prg_rom = np.zeros(0, dtype=np.uint8)
 
         if chr_size == 0:
-            # print("CHR-ROM отсутствует, создаем RAM для графики (8KB)")
             self.chr_rom = np.zeros(8192, dtype=np.uint8)
             self.chr_banks = 1
         else:
@@ -49,12 +70,26 @@ cdef class Cartridge:
         self.prg_rom_view = self.prg_rom
         self.chr_rom_view = self.chr_rom
 
-        # print(f"PRG: {len(self.prg_rom)}, CHR: {len(self.chr_rom)}, Mapper: {self.mapper}, Mirroring: {'Vertical' if self.mirroring else 'Horizontal'}")
 
         self.load_mapper()
 
     
     def load_mapper(self):
+        """Instantiate mapper implementation for the currently parsed mapper id.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Assigns `self.mapper_instance` with one of the supported mapper
+            classes.
+
+        Raises:
+            ValueError: If mapper id is not supported by this build.
+        """
         if self.mapper == 0:
             self.mapper_instance = Mapper0(self.prg_rom, self.chr_rom)
         elif self.mapper == 1:
