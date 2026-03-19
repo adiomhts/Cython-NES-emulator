@@ -1,4 +1,5 @@
 import pygame
+import os
 from cpu import CPU6502
 from ppu import PPU
 from apu import APU
@@ -36,6 +37,7 @@ class NES:
         pygame.display.set_caption("NES Emulator")
         
         self.cartridge = Cartridge(rom_path) 
+        self.rom_path = rom_path
         
         mirroring_mode = self.cartridge.mirroring
 
@@ -45,19 +47,115 @@ class NES:
             self.ppu.cpu = self.cpu
         except Exception:
             pass
+        try:
+            self.ppu.cartridge = self.cartridge
+        except Exception:
+            pass
         self.apu = APU()
         try:
             self.apu.cpu = self.cpu
         except Exception:
             pass
         self.controller = Controller()
+        self.controller2 = Controller()
         try:
             self.ppu.chr_rom = self.cartridge.chr_rom
         except Exception:
             self.ppu.chr_rom = None
-        self.cpu.set_peripherals(self.ppu, self.apu, self.controller)
+        self.cpu.set_peripherals(self.ppu, self.apu, self.controller, self.controller2)
         self.cpu.set_cartridge(self.cartridge)
         self.load_rom()
+        self._load_battery_ram()
+
+    def _save_path(self):
+        """Build persistent save path for the loaded ROM.
+
+        Args:
+            None.
+
+        Returns:
+            str: Path to `.sav` file located next to the ROM.
+        """
+        base, _ = os.path.splitext(self.rom_path)
+        return base + ".sav"
+
+    def _load_battery_ram(self):
+        """Load battery-backed PRG RAM from disk into `$6000-$7FFF`.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Reads save data from `.sav` file and writes it to CPU RAM window.
+        """
+        if not getattr(self.cartridge, 'battery_backed', 0):
+            return
+
+        save_path = self._save_path()
+        if not os.path.exists(save_path):
+            return
+
+        with open(save_path, 'rb') as f:
+            raw = f.read(0x2000)
+
+        if raw:
+            mapper_ram = None
+            try:
+                mapper_ram = getattr(self.cartridge.mapper_instance, 'prg_ram', None)
+            except Exception:
+                mapper_ram = None
+
+            if mapper_ram is not None:
+                mapper_ram[:len(raw)] = list(raw)
+            else:
+                self.cpu.memory[0x6000:0x6000 + len(raw)] = list(raw)
+
+    def save_battery_ram(self):
+        """Persist battery-backed PRG RAM from `$6000-$7FFF` to disk.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Writes 8KB PRG RAM snapshot to `.sav` file for battery carts.
+        """
+        if not getattr(self.cartridge, 'battery_backed', 0):
+            return
+
+        save_path = self._save_path()
+        mapper_ram = None
+        try:
+            mapper_ram = getattr(self.cartridge.mapper_instance, 'prg_ram', None)
+        except Exception:
+            mapper_ram = None
+
+        if mapper_ram is not None:
+            payload = bytes(mapper_ram[:0x2000])
+        else:
+            payload = bytes(self.cpu.memory[0x6000:0x8000])
+
+        with open(save_path, 'wb') as f:
+            f.write(payload)
+
+    def shutdown(self):
+        """Finalize emulator state before application exit.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Saves battery-backed RAM if cartridge supports persistence.
+        """
+        self.save_battery_ram()
 
     def load_rom(self):
         """Map cartridge PRG data into CPU memory according to mapper id.

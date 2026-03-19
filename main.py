@@ -20,6 +20,17 @@ KEY_MAP = {
     'RIGHT': pygame.K_RIGHT
 }
 
+KEY_MAP_P2 = {
+    'A': pygame.K_u,
+    'B': pygame.K_o,
+    'SELECT': pygame.K_RCTRL,
+    'START': pygame.K_RALT,
+    'UP': pygame.K_i,
+    'DOWN': pygame.K_k,
+    'LEFT': pygame.K_j,
+    'RIGHT': pygame.K_l
+}
+
 def main():
     """Run the interactive emulator loop.
 
@@ -47,39 +58,56 @@ def main():
     clock = pygame.time.Clock()
     running = True
 
-    print("Emulator started. Controls: Arrows=Move, Z=A, X=B, Enter=Start, RShift=Select")
+    print("Emulator started. P1: Arrows=Move, Z=A, X=B, Enter=Start, RShift=Select")
+    print("P2: I/J/K/L=Move, U=A, O=B, RAlt=Start, RCtrl=Select")
 
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
+    try:
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
                     running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
 
-        keys = pygame.key.get_pressed()
-        
-        input_state = [
-            keys[KEY_MAP['A']],
-            keys[KEY_MAP['B']],
-            keys[KEY_MAP['SELECT']],
-            keys[KEY_MAP['START']],
-            keys[KEY_MAP['UP']],
-            keys[KEY_MAP['DOWN']],
-            keys[KEY_MAP['LEFT']],
-            keys[KEY_MAP['RIGHT']]
-        ]
-        
-        if hasattr(nes, 'controller') and nes.controller:
-            nes.controller.update(input_state)
+            keys = pygame.key.get_pressed()
 
-        nes.run_frame()
-        
-        clock.tick(60)
-        
-        pygame.display.set_caption(f"NES Emulator - {clock.get_fps():.2f} FPS")
+            input_state = [
+                keys[KEY_MAP['A']],
+                keys[KEY_MAP['B']],
+                keys[KEY_MAP['SELECT']],
+                keys[KEY_MAP['START']],
+                keys[KEY_MAP['UP']],
+                keys[KEY_MAP['DOWN']],
+                keys[KEY_MAP['LEFT']],
+                keys[KEY_MAP['RIGHT']]
+            ]
 
-    pygame.quit()
+            input_state_p2 = [
+                keys[KEY_MAP_P2['A']],
+                keys[KEY_MAP_P2['B']],
+                keys[KEY_MAP_P2['SELECT']],
+                keys[KEY_MAP_P2['START']],
+                keys[KEY_MAP_P2['UP']],
+                keys[KEY_MAP_P2['DOWN']],
+                keys[KEY_MAP_P2['LEFT']],
+                keys[KEY_MAP_P2['RIGHT']]
+            ]
+
+            if hasattr(nes, 'controller') and nes.controller:
+                nes.controller.update(input_state)
+            if hasattr(nes, 'controller2') and nes.controller2:
+                nes.controller2.update(input_state_p2)
+
+            nes.run_frame()
+
+            clock.tick(60)
+
+            pygame.display.set_caption(f"NES Emulator - {clock.get_fps():.2f} FPS")
+    finally:
+        if hasattr(nes, 'shutdown'):
+            nes.shutdown()
+        pygame.quit()
 
 
 if __name__ == "__main__":

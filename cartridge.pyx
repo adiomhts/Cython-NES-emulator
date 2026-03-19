@@ -15,7 +15,7 @@ cdef class Cartridge:
     cdef unsigned char[:] prg_rom_view
     cdef unsigned char[:] chr_rom_view
     
-    cdef public uint8_t mapper, prg_banks, chr_banks, mirroring
+    cdef public uint8_t mapper, prg_banks, chr_banks, mirroring, battery_backed
     cdef public object mapper_instance
 
     def __init__(self, file_path: str):
@@ -45,6 +45,7 @@ cdef class Cartridge:
         self.chr_banks = data[5]
         
         self.mirroring = data[6] & 1
+        self.battery_backed = 1 if (data[6] & 0x02) else 0
         
         self.mapper = ((data[6] >> 4) | ((data[7] & 0xF0) >> 4))
 

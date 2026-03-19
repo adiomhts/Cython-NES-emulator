@@ -33,11 +33,13 @@ cdef class PPU:
     cdef int sprite0_hit_x
     cdef uint8_t[:] scanline_bg
     cdef int sprite0_in_scanline
+    cdef bint odd_frame
     
     cdef int[:, :] nes_palette
     
     cdef public object chr_rom
     cdef public object cpu
+    cdef public object cartridge
 
     def __init__(self, mirroring=0):
         """Initialize PPU state and memory arrays.
@@ -92,8 +94,10 @@ cdef class PPU:
             [248,216,120],[216,248,120],[184,248,184],[184,248,216],[0,252,252],[248,216,248],[0,0,0],[0,0,0]
         ], dtype=np.int32)
         self.chr_rom = None
+        self.cartridge = None
         self.scanline_bg = np.zeros(256, dtype=np.uint8)
         self.sprite0_in_scanline = -1
+        self.odd_frame = False
 
     
     cdef void increment_v(self):
@@ -162,6 +166,29 @@ cdef class PPU:
             return bank * 0x400 + offset
         return 0
 
+    cdef inline bint _has_chr_source(self):
+        return self.cartridge is not None or self.chr_rom is not None
+
+    cdef inline uint8_t _read_chr(self, uint16_t addr):
+        if self.cartridge is not None:
+            try:
+                return self.cartridge.mapper_instance.read_chr(addr)
+            except Exception:
+                pass
+        if self.chr_rom is not None and addr < len(self.chr_rom):
+            return self.chr_rom[addr]
+        return 0
+
+    cdef inline void _write_chr(self, uint16_t addr, uint8_t value):
+        if self.cartridge is not None:
+            try:
+                self.cartridge.mapper_instance.write_chr(addr, value)
+                return
+            except Exception:
+                pass
+        if self.chr_rom is not None and addr < len(self.chr_rom):
+            self.chr_rom[addr] = value
+
 
     cdef void _step_core(self):
         cdef bint rendering_enabled
@@ -195,6 +222,12 @@ cdef class PPU:
                 self.sprite0_hit = 1
                 self.status |= 0x40
 
+        if self.scanline == 261 and self.cycle == 339 and rendering_enabled and self.odd_frame:
+            self.cycle = 0
+            self.scanline = 0
+            self.odd_frame = False
+            return
+
         if self.cycle >= 341:
             self.cycle = 0
             self.scanline += 1
@@ -209,6 +242,7 @@ cdef class PPU:
             
             elif self.scanline >= 262:
                 self.scanline = 0
+                self.odd_frame = not self.odd_frame
         
         if self.scanline == 261 and rendering_enabled:
             if self.cycle == 256:
@@ -340,8 +374,7 @@ cdef class PPU:
         elif reg == 0x2007: 
             addr = self.v & 0x3FFF
             if addr < 0x2000:
-                if self.chr_rom is not None and addr < len(self.chr_rom):
-                    self.chr_rom[addr] = value
+                self._write_chr(<uint16_t>addr, value)
             elif addr < 0x3F00:
                 phys = self.get_vram_mirror(addr)
                 self.vram[phys] = value
@@ -366,7 +399,6 @@ cdef class PPU:
         """
         cdef int addr, pal_addr
         cdef uint8_t ret
-        cdef uint8_t[:] chr_view_r
         reg = reg & 0x2007
         
         if reg == 0x2002: 
@@ -382,17 +414,14 @@ cdef class PPU:
             addr = self.v & 0x3FFF
             if addr < 0x2000:
                 ret = self.read_buffer
-                if self.chr_rom is not None and addr < len(self.chr_rom):
-                    chr_view_r = self.chr_rom
-                    self.read_buffer = chr_view_r[addr]
-                else:
-                    self.read_buffer = 0
+                self.read_buffer = self._read_chr(<uint16_t>addr)
             elif addr < 0x3F00:
                 ret = self.read_buffer
                 self.read_buffer = self.vram[self.get_vram_mirror(addr)]
             else:
                 pal_addr = self.get_vram_mirror(addr)
                 ret = self.palette_ram[pal_addr]
+                self.read_buffer = self.vram[self.get_vram_mirror(addr - 0x1000)]
             self.increment_v_2007()
             return ret
         return 0
@@ -414,7 +443,7 @@ cdef class PPU:
         if not (self.mask & 0x08):
             return
 
-        if self.chr_rom is None:
+        if not self._has_chr_source():
             return
         cdef int fine_y, coarse_y_v, nt_select, coarse_x_start, fine_x_start
         cdef int nt_x_base, nt_y_base
@@ -432,8 +461,6 @@ cdef class PPU:
         cdef uint8_t[:] scanline_bg = self.scanline_bg
         cdef uint8_t[:, :, :] frame_buffer = self.frame_buffer
         cdef int[:, :] nes_palette = self.nes_palette
-        cdef uint8_t[:] chr_rom = self.chr_rom
-        cdef int chr_len = chr_rom.shape[0]
 
         fine_y        = (self.v >> 12) & 7
         coarse_y_v    = (self.v >> 5)  & 31
@@ -478,12 +505,9 @@ cdef class PPU:
                 tile_index  = vram[nt_addr]
                 tile_offset = bg_pattern_base + tile_index * 16
 
-                if tile_offset + 16 > chr_len:
-                    tile_valid = False
-                else:
-                    tile_valid = True
-                    low  = chr_rom[tile_offset + fine_y]
-                    high = chr_rom[tile_offset + 8 + fine_y]
+                tile_valid = True
+                low  = self._read_chr(<uint16_t>(tile_offset + fine_y))
+                high = self._read_chr(<uint16_t>(tile_offset + 8 + fine_y))
 
                 attr_addr = self.get_vram_mirror(
                     0x2000 + (current_nt * 0x400) + 0x3C0 + ((tile_y >> 2) * 8) + (tile_x >> 2)
@@ -520,7 +544,7 @@ cdef class PPU:
         cdef uint8_t low, high, bit0, bit1, pix
         cdef int col, sx
 
-        if self.chr_rom is None:
+        if not self._has_chr_source():
             return -1
         if (self.mask & 0x18) != 0x18:
             return -1
@@ -555,11 +579,8 @@ cdef class PPU:
                 tile_row = scanline_y - 8
                 tile_offset = bank + (base_index + 1) * 16
 
-        if tile_offset + 8 >= len(self.chr_rom):
-            return -1
-
-        low = self.chr_rom[tile_offset + tile_row]
-        high = self.chr_rom[tile_offset + 8 + tile_row]
+        low = self._read_chr(<uint16_t>(tile_offset + tile_row))
+        high = self._read_chr(<uint16_t>(tile_offset + 8 + tile_row))
 
         for col in range(8):
             sx = x + (7 - col if flip_x else col)
@@ -632,7 +653,7 @@ cdef class PPU:
             Writes sprite RGB values into framebuffer according to transparency,
             priority, clipping, and palette rules.
         """
-        if self.chr_rom is None:
+        if not self._has_chr_source():
             return
         if not (self.mask & 0x10):
             return
@@ -678,11 +699,8 @@ cdef class PPU:
                     tile_row = scanline_y - 8
                     tile_offset = bank + (base_index + 1) * 16
 
-            if tile_offset + 8 >= len(self.chr_rom):
-                continue
-                
-            low = self.chr_rom[tile_offset + tile_row]
-            high = self.chr_rom[tile_offset + 8 + tile_row]
+            low = self._read_chr(<uint16_t>(tile_offset + tile_row))
+            high = self._read_chr(<uint16_t>(tile_offset + 8 + tile_row))
             
             for col in range(8):
                 sx = x + (7 - col if flip_x else col)

@@ -40,6 +40,9 @@ cdef class APU:
     cdef int frame_reload_pending
     cdef int frame_reload_delay
     cdef int frame_reload_mode_5step
+    cdef uint8_t frame_irq_inhibit
+    cdef uint8_t frame_irq_flag
+    cdef uint8_t dmc_irq_flag
 
     cdef uint8_t pulse_enabled[2]
     cdef uint8_t pulse_duty[2]
@@ -134,6 +137,9 @@ cdef class APU:
         self.frame_reload_pending = 0
         self.frame_reload_delay = 0
         self.frame_reload_mode_5step = 0
+        self.frame_irq_inhibit = 0
+        self.frame_irq_flag = 0
+        self.dmc_irq_flag = 0
 
         self.pulse_enabled[0] = 0
         self.pulse_enabled[1] = 0
@@ -381,6 +387,13 @@ cdef class APU:
         if self.dmc_bytes_remaining == 0 and self.dmc_loop:
             self.dmc_cur_addr = self.dmc_sample_addr
             self.dmc_bytes_remaining = self.dmc_sample_len
+        elif self.dmc_bytes_remaining == 0 and self.dmc_irq_enable:
+            self.dmc_irq_flag = 1
+            if self.cpu is not None:
+                try:
+                    self.cpu.trigger_interrupt(1)
+                except Exception:
+                    pass
 
     cdef void _clock_dmc(self, uint32_t cpu_cycles):
         cdef int period
@@ -531,6 +544,14 @@ cdef class APU:
             if old_pos < e4 <= new_pos:
                 self._clock_half_frame()
 
+            if self.frame_mode_5step == 0 and old_pos < e4 <= new_pos and self.frame_irq_inhibit == 0:
+                self.frame_irq_flag = 1
+                if self.cpu is not None:
+                    try:
+                        self.cpu.trigger_interrupt(1)
+                    except Exception:
+                        pass
+
             if new_pos >= seq_len:
                 self.frame_cycle_pos = 0
             else:
@@ -553,6 +574,28 @@ cdef class APU:
         if self.frame_mode_5step:
             self._clock_quarter_frame()
             self._clock_half_frame()
+
+    cpdef public uint8_t read_status(self):
+        cdef uint8_t status
+
+        status = 0
+        if self.pulse_length[0] > 0:
+            status |= 0x01
+        if self.pulse_length[1] > 0:
+            status |= 0x02
+        if self.tri_length > 0:
+            status |= 0x04
+        if self.noise_length > 0:
+            status |= 0x08
+        if self.dmc_bytes_remaining > 0:
+            status |= 0x10
+        if self.frame_irq_flag:
+            status |= 0x40
+        if self.dmc_irq_flag:
+            status |= 0x80
+
+        self.frame_irq_flag = 0
+        return status
 
     cdef void _emit_audio_if_needed(self):
         cdef cnp.ndarray[cnp.int16_t, ndim=1] pcm
@@ -756,6 +799,7 @@ cdef class APU:
             return
 
         elif addr == 0x4015:
+            self.dmc_irq_flag = 0
             for ch in range(2):
                 self.pulse_enabled[ch] = 1 if (value & (1 << ch)) else 0
                 if self.pulse_enabled[ch] == 0:
@@ -777,6 +821,9 @@ cdef class APU:
             return
 
         elif addr == 0x4017:
+            self.frame_irq_inhibit = 1 if (value & 0x40) else 0
+            if self.frame_irq_inhibit:
+                self.frame_irq_flag = 0
             self.frame_reload_pending = 1
             self.frame_reload_mode_5step = 1 if (value & 0x80) else 0
             self.frame_reload_delay = 3 if (self.cycles & 1) else 4

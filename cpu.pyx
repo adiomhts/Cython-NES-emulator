@@ -58,7 +58,9 @@ cdef struct OpcodeDef:
 
 cdef class CPU6502
 
-cdef void (*opcode_table[256])(CPU6502)  
+ctypedef void (*OpcodeHandler)(CPU6502)
+
+cdef OpcodeHandler opcode_table[256]
 cdef OpcodeDef opcode_defs[256]
 
 cdef void init_opcodes():
@@ -573,6 +575,7 @@ cdef class CPU6502:
     cdef object ppu
     cdef object apu
     cdef object controller
+    cdef object controller2
     cdef object cartridge
     cdef int _debug_instr_printed
     cdef int _debug_instr_limit
@@ -609,6 +612,7 @@ cdef class CPU6502:
         self.interrupt_vectors[2] = 0xFFFC
         self.interrupts[0] = False
         self.interrupts[1] = False
+        self.controller2 = None
         self._debug_instr_printed = 0
         self._debug_instr_limit = 50
 
@@ -645,6 +649,15 @@ cdef class CPU6502:
             
         if 0x4000 <= address <= 0x401F:
             return self.read_io_register(address)
+
+        if 0x6000 <= address <= 0x7FFF:
+            if self.cartridge is not None:
+                try:
+                    if getattr(self.cartridge, 'mapper', 0) == 1:
+                        return self.cartridge.mapper_instance.read_prg(address)
+                except Exception:
+                    pass
+            return self.memory[address]
             
         if 0x8000 <= address <= 0xFFFF:
             return self.cartridge.mapper_instance.read_prg(address)
@@ -663,6 +676,16 @@ cdef class CPU6502:
 
         if 0x0000 <= address <= 0x1FFF:
             self.ram[address & 0x07FF] = value
+
+        elif 0x6000 <= address <= 0x7FFF:
+            if self.cartridge is not None:
+                try:
+                    if getattr(self.cartridge, 'mapper', 0) == 1:
+                        self.cartridge.mapper_instance.write_prg(address, value)
+                        return
+                except Exception:
+                    pass
+            self.memory[address] = value
             
         elif address >= 0x8000:
             self.cartridge.mapper_instance.write_prg(address, value)
@@ -807,12 +830,11 @@ cdef class CPU6502:
             Marks corresponding interrupt slot as pending when allowed by CPU
             interrupt mask rules.
         """
-        if not self.F.interrupts_disabled or type == 0:
-            self.interrupts[type] = True
-            try:
-                itype = {0: 'NMI', 1: 'IRQ', 2: 'RESET'}.get(type, str(type))
-            except Exception:
-                pass
+        self.interrupts[type] = True
+        try:
+            itype = {0: 'NMI', 1: 'IRQ', 2: 'RESET'}.get(type, str(type))
+        except Exception:
+            pass
 
     cdef void write_io_register(self, uint16_t reg, uint8_t val):
         cdef int i
@@ -837,6 +859,8 @@ cdef class CPU6502:
         elif reg == 0x4016:
             if self.controller is not None:
                 self.controller.write(val)
+            if self.controller2 is not None:
+                self.controller2.write(val)
                 
         elif reg <= 0x401F:
             if self.apu is not None:
@@ -846,18 +870,30 @@ cdef class CPU6502:
 
 
     cdef uint8_t read_io_register(self, uint16_t reg):
+        if reg == 0x4015:
+            if self.apu is not None:
+                return self.apu.read_status()
+            return 0
+
         if reg == 0x4016:
             if self.controller is not None:
                 return self.controller.read()
+            return 0x40
+
+        if reg == 0x4017:
+            if self.controller2 is not None:
+                return self.controller2.read()
+            return 0x40
         return 0
 
-    def set_peripherals(self, ppu, apu, controller):
+    def set_peripherals(self, ppu, apu, controller, controller2=None):
         """Attach memory-mapped peripherals.
 
         Args:
             ppu: PPU instance handling `$2000-$3FFF` register space.
             apu: APU instance handling `$4000-$4017` register writes.
             controller: Controller instance handling `$4016` reads/writes.
+            controller2: Optional controller instance for `$4017` reads.
 
         Returns:
             None.
@@ -868,6 +904,7 @@ cdef class CPU6502:
         self.ppu = ppu
         self.apu = apu
         self.controller = controller
+        self.controller2 = controller2
 
     def set_cartridge(self, cartridge):
         """Attach cartridge/mapper backend.
@@ -896,8 +933,15 @@ cdef class CPU6502:
             Services pending interrupts or fetches/executes one opcode,
             mutating registers, memory, and cycle counter.
         """
+        if self.cartridge is not None:
+            try:
+                if getattr(self.cartridge.mapper_instance, 'irq_pending', 0):
+                    self.interrupts[1] = True
+            except Exception:
+                pass
+
         for i in range(2):
-            if self.interrupts[i]:
+            if self.interrupts[i] and (i == 0 or not self.F.interrupts_disabled):
                 self.push_word(self.PC)
                 self.push(self.get_P())
                 self.PC = self.read_word(self.interrupt_vectors[i])
