@@ -6,12 +6,33 @@ from apu import APU
 from controller import Controller
 from cartridge import Cartridge
 
+# Glossary (terms used in comments/docstrings in this file):
+# - CPU: Central Processing Unit (Ricoh 2A03, 6502-like core in NES).
+# - PPU: Picture Processing Unit (video generator and VRAM controller).
+# - APU: Audio Processing Unit (sound channels + frame sequencer).
+# - PRG: Program ROM/RAM mapped into CPU cartridge space.
+# - CHR: Character/Pattern data used by PPU tile/sprite fetches.
+# - Mapper: Cartridge logic for bank switching and IRQ features.
+# - NMI/IRQ: Non-maskable / maskable CPU interrupt lines.
+# - RGB: Red/Green/Blue color triplet format used in framebuffer arrays.
+# NESdev references:
+# - https://www.nesdev.org/wiki/CPU
+# - https://www.nesdev.org/wiki/PPU
+# - https://www.nesdev.org/wiki/APU
+# - https://www.nesdev.org/wiki/Mapper
+
 
 class NES:
     """Top-level NES system wiring for CPU, PPU, APU, controller, and cartridge.
 
     This class owns all major emulator subsystems and coordinates timing
     between them on a frame boundary.
+
+    NESdev references:
+    - https://www.nesdev.org/wiki/Nesdev_Wiki
+    - https://www.nesdev.org/wiki/CPU
+    - https://www.nesdev.org/wiki/PPU
+    - https://www.nesdev.org/wiki/APU
     """
 
     def __init__(self, rom_path):
@@ -31,40 +52,57 @@ class NES:
         Raises:
             ValueError: If cartridge parser rejects the ROM format.
             OSError: If ROM file cannot be read.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/CPU_memory_map
+            https://www.nesdev.org/wiki/Mirroring
+            https://www.nesdev.org/wiki/PPU_registers
         """
+        # Initialize host multimedia backend and create 256x240 output surface.
         pygame.init()
         self.screen = pygame.display.set_mode((256, 240))
         pygame.display.set_caption("NES Emulator")
         
+        # Parse ROM, iNES header, mapper info, and PRG/CHR payloads.
         self.cartridge = Cartridge(rom_path) 
         self.rom_path = rom_path
         
+        # Nametable mirroring mode is determined by cartridge header / mapper.
         mirroring_mode = self.cartridge.mirroring
 
+        # Create main hardware blocks.
         self.cpu = CPU6502()
         self.ppu = PPU(mirroring=mirroring_mode)
+        # Bind CPU into PPU context so PPU can raise NMI/IRQ-style events.
         try:
             self.ppu.cpu = self.cpu
         except Exception:
             pass
+        # Give PPU direct cartridge view for CHR reads where needed.
         try:
             self.ppu.cartridge = self.cartridge
         except Exception:
             pass
+        # Create audio unit and connect it to CPU timing domain.
         self.apu = APU()
         try:
             self.apu.cpu = self.cpu
         except Exception:
             pass
+        # Two standard gamepads.
         self.controller = Controller()
         self.controller2 = Controller()
+        # Expose CHR ROM/RAM to PPU pattern-table fetch path.
         try:
             self.ppu.chr_rom = self.cartridge.chr_rom
         except Exception:
             self.ppu.chr_rom = None
+        # Wire CPU memory-mapped devices and cartridge mapper backend.
         self.cpu.set_peripherals(self.ppu, self.apu, self.controller, self.controller2)
         self.cpu.set_cartridge(self.cartridge)
+        # Initialize CPU memory view for initial mapper state.
         self.load_rom()
+        # Load persistent PRG RAM if cartridge has battery-backed save support.
         self._load_battery_ram()
 
     def _save_path(self):
@@ -75,7 +113,11 @@ class NES:
 
         Returns:
             str: Path to `.sav` file located next to the ROM.
+
+        NESdev reference:
+            https://www.nesdev.org/wiki/INES#Flags_6
         """
+        # Save file is colocated with ROM and uses `.sav` extension.
         base, _ = os.path.splitext(self.rom_path)
         return base + ".sav"
 
@@ -90,14 +132,21 @@ class NES:
 
         Side Effects:
             Reads save data from `.sav` file and writes it to CPU RAM window.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/CPU_memory_map
+            https://www.nesdev.org/wiki/INES#Flags_6
         """
+        # Skip if cartridge does not advertise battery-backed persistent RAM.
         if not getattr(self.cartridge, 'battery_backed', 0):
             return
 
         save_path = self._save_path()
+        # No existing save file means clean power-on PRG RAM contents.
         if not os.path.exists(save_path):
             return
 
+        # PRG RAM battery window size is 8KB in this emulator path.
         with open(save_path, 'rb') as f:
             raw = f.read(0x2000)
 
@@ -108,9 +157,11 @@ class NES:
             except Exception:
                 mapper_ram = None
 
+            # Prefer mapper-owned PRG RAM buffer when mapper exposes one.
             if mapper_ram is not None:
                 mapper_ram[:len(raw)] = list(raw)
             else:
+                # Fallback path writes directly into CPU $6000-$7FFF shadow.
                 self.cpu.memory[0x6000:0x6000 + len(raw)] = list(raw)
 
     def save_battery_ram(self):
@@ -124,7 +175,12 @@ class NES:
 
         Side Effects:
             Writes 8KB PRG RAM snapshot to `.sav` file for battery carts.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/INES#Flags_6
+            https://www.nesdev.org/wiki/CPU_memory_map
         """
+        # Do nothing for cartridges without battery-backed memory.
         if not getattr(self.cartridge, 'battery_backed', 0):
             return
 
@@ -135,11 +191,13 @@ class NES:
         except Exception:
             mapper_ram = None
 
+        # Mapper RAM takes priority over generic CPU RAM fallback window.
         if mapper_ram is not None:
             payload = bytes(mapper_ram[:0x2000])
         else:
             payload = bytes(self.cpu.memory[0x6000:0x8000])
 
+        # Persist in one write so save file stays coherent.
         with open(save_path, 'wb') as f:
             f.write(payload)
 
@@ -154,7 +212,11 @@ class NES:
 
         Side Effects:
             Saves battery-backed RAM if cartridge supports persistence.
+
+        NESdev reference:
+            https://www.nesdev.org/wiki/INES#Flags_6
         """
+        # Current shutdown step is save flush; place future teardown hooks here.
         self.save_battery_ram()
 
     def load_rom(self):
@@ -171,25 +233,35 @@ class NES:
 
         Raises:
             ValueError: If mapper id is not implemented.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/CPU_memory_map
+            https://www.nesdev.org/wiki/Mapper
         """
+        # Number of PRG bytes determines mirroring/banking decisions.
         prg_size = len(self.cartridge.prg_rom)
 
         if self.cartridge.mapper == 0:
+            # NROM-128 (16KB): mirror bank into both $8000 and $C000 windows.
             if prg_size <= 0x4000:
                 self.cpu.memory[0x8000:0xC000] = self.cartridge.prg_rom
                 self.cpu.memory[0xC000:0x10000] = self.cartridge.prg_rom
             else:
+                # NROM-256 (32KB): map full PRG linearly at $8000-$FFFF.
                 self.cpu.memory[0x8000:0x10000] = self.cartridge.prg_rom
 
         elif self.cartridge.mapper == 1:
+            # MMC1-style boot mapping: first bank at $8000, last bank fixed at $C000.
             self.cpu.memory[0x8000:0xC000] = self.cartridge.prg_rom[:0x4000]
             self.cpu.memory[0xC000:0x10000] = self.cartridge.prg_rom[-0x4000:]
 
         elif self.cartridge.mapper == 2:
+            # UxROM-style: fixed upper bank and switchable lower bank (initially bank 0).
             self.cpu.memory[0xC000:0x10000] = self.cartridge.prg_rom[-0x4000:]
             self.cpu.memory[0x8000:0xC000] = self.cartridge.prg_rom[:0x4000]
 
         elif self.cartridge.mapper == 3:
+            # CNROM has CHR switching; PRG mapping is typically NROM-like.
             if prg_size <= 0x4000:
                 self.cpu.memory[0x8000:0xC000] = self.cartridge.prg_rom
                 self.cpu.memory[0xC000:0x10000] = self.cartridge.prg_rom
@@ -197,6 +269,7 @@ class NES:
                 self.cpu.memory[0x8000:0x10000] = self.cartridge.prg_rom
 
         elif self.cartridge.mapper == 4:
+            # Placeholder MMC3 split window arrangement for startup mapping.
             self.cpu.memory[0x8000:0xA000] = self.cartridge.prg_rom[:0x2000]
             self.cpu.memory[0xA000:0xC000] = self.cartridge.prg_rom[-0x4000:-0x2000]
             self.cpu.memory[0xC000:0xE000] = self.cartridge.prg_rom[-0x2000:]
@@ -205,6 +278,7 @@ class NES:
         else:
             raise ValueError(f"Unsupported mapper: {self.cartridge.mapper}")
 
+        # Reset vectors/program counter are reloaded after mapping is ready.
         self.cpu.reset()
 
     def render_screen(self):
@@ -218,8 +292,14 @@ class NES:
 
         Side Effects:
             Blits a pygame surface and flips the display buffer.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/PPU_rendering
+            https://www.nesdev.org/wiki/NTSC_video
         """
+        # Convert internal RGB frame buffer (numpy-like) to pygame surface.
         surface = pygame.surfarray.make_surface(self.ppu.frame_buffer.swapaxes(0, 1))
+        # Copy frame to the screen backbuffer and present it.
         self.screen.blit(surface, (0, 0))
         pygame.display.flip()
 
@@ -235,20 +315,34 @@ class NES:
         Side Effects:
             Advances CPU instruction stream, steps PPU at 3x CPU cycle rate,
             advances APU by consumed CPU cycles, and renders the resulting frame.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/Cycle_reference_chart
+            https://www.nesdev.org/wiki/PPU_frame_timing
+            https://www.nesdev.org/wiki/APU
         """
+        # Approximate CPU cycles per NTSC frame for pacing in this emulator.
         frame_cycles = 0
+        # Continue stepping until the frame cycle budget is consumed.
         while frame_cycles < 29780:
+            # Capture cycle counter before running the next CPU instruction.
             cycles_before = self.cpu.cycles
             
+            # Execute one CPU instruction.
             self.cpu.step()
             
+            # Determine exact cycle cost of that instruction.
             cycles_diff = self.cpu.cycles - cycles_before
             
+            # PPU runs 3x the CPU clock, so convert CPU cycles to PPU ticks.
             ppu_steps = cycles_diff * 3
             self.ppu.step_many(ppu_steps)
             
+            # APU timing is tracked in CPU cycle domain.
             self.apu.step(cycles_diff)
             
+            # Accumulate frame progress in CPU cycles.
             frame_cycles += cycles_diff
             
+        # Present frame once CPU/PPU/APU are advanced to frame boundary.
         self.render_screen()

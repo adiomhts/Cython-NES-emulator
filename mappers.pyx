@@ -2,8 +2,24 @@ import numpy as np
 cimport numpy as cnp
 from libc.stdint cimport uint8_t, uint16_t
 
+# Glossary (terms used in comments/docstrings in this file):
+# - Mapper: Cartridge logic controlling PRG/CHR mapping and optional IRQs.
+# - PRG/CHR bank: Switchable ROM/RAM window in CPU/PPU cartridge space.
+# - MMC1/MMC3: Nintendo mapper ASIC families (Mapper 1 / Mapper 4 behavior).
+# - A12: PPU address line used by MMC3 IRQ edge detector.
+# - IRQ latch/counter: MMC3 scanline-ish interrupt timing mechanism.
+# NESdev references:
+# - https://www.nesdev.org/wiki/Mapper
+# - https://www.nesdev.org/wiki/MMC1
+# - https://www.nesdev.org/wiki/MMC3
+
 cdef class Mapper0:
-    """Mapper 0 (NROM): fixed PRG/CHR mapping without bank switching."""
+    """Mapper 0 (NROM): fixed PRG/CHR mapping without bank switching.
+
+    NESdev references:
+    - https://www.nesdev.org/wiki/Mapper_000
+    - https://www.nesdev.org/wiki/NROM
+    """
 
     def __init__(self, prg_rom, chr_rom):
         """Initialize mapper with fixed PRG/CHR memory views.
@@ -17,7 +33,11 @@ cdef class Mapper0:
 
         Side Effects:
             Stores references and creates typed views for fast indexed access.
+
+        NESdev reference:
+            https://www.nesdev.org/wiki/Mapper_000
         """
+        # NROM has no bank registers; map data directly.
         self.prg_rom = prg_rom
         self.chr_rom = chr_rom
         self.prg_rom_view = self.prg_rom
@@ -31,7 +51,12 @@ cdef class Mapper0:
 
         Returns:
             uint8_t: Byte value from mapped PRG region.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/CPU_memory_map
+            https://www.nesdev.org/wiki/Mapper_000
         """
+        # NROM mirrors by modulo when only one 16KB bank exists.
         if address >= 0x8000:
             return self.prg_rom_view[address % len(self.prg_rom_view)]
         return 0
@@ -44,20 +69,31 @@ cdef class Mapper0:
 
         Returns:
             uint8_t: Byte value from CHR storage.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/PPU_pattern_tables
+            https://www.nesdev.org/wiki/Mapper_000
         """
         return self.chr_rom_view[address % len(self.chr_rom_view)]
 
     cpdef public void write_prg(self, uint16_t address, uint8_t value):
+        # NROM usually ignores PRG writes; this path allows RAM-like behavior.
         if address >= 0x8000:
             self.prg_rom_view[address % len(self.prg_rom_view)] = value
 
     cpdef public void write_chr(self, uint16_t address, uint8_t value):
+        # CHR writes are meaningful only for CHR-RAM cartridges.
         if len(self.chr_rom_view) > 0:
             self.chr_rom_view[address % len(self.chr_rom_view)] = value
 
 
 cdef class Mapper1:
-    """Mapper 1 (MMC1-like) with serial register writes and PRG-RAM support."""
+    """Mapper 1 (MMC1-like) with serial register writes and PRG-RAM support.
+
+    NESdev references:
+    - https://www.nesdev.org/wiki/Mapper_001
+    - https://www.nesdev.org/wiki/MMC1
+    """
 
     def __init__(self, prg_rom, chr_rom):
         """Initialize mapper state and selected banks.
@@ -71,7 +107,11 @@ cdef class Mapper1:
 
         Side Effects:
             Initializes active PRG/CHR bank selectors.
+
+        NESdev reference:
+            https://www.nesdev.org/wiki/MMC1
         """
+        # ROM/RAM buffers plus serial shift-register state.
         self.prg_rom = prg_rom
         self.chr_rom = chr_rom
         self.prg_ram = np.zeros(0x2000, dtype=np.uint8)
@@ -93,12 +133,17 @@ cdef class Mapper1:
 
         Returns:
             uint8_t: Byte from PRG-RAM (`$6000-$7FFF`) or mapped PRG-ROM bank.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/MMC1
+            https://www.nesdev.org/wiki/CPU_memory_map
         """
         cdef int prg_banks_16k
         cdef int bank, offset
         cdef int mode
 
         if 0x6000 <= address < 0x8000:
+            # PRG-RAM window.
             return self.prg_ram_view[address - 0x6000]
 
         prg_banks_16k = len(self.prg_rom_view) // 0x4000
@@ -107,18 +152,21 @@ cdef class Mapper1:
 
         mode = (self.control >> 2) & 0x03
         if mode == 0 or mode == 1:
+            # 32KB PRG banking (ignore low bank bit).
             bank = (self.prg_bank_reg & 0x0E) % prg_banks_16k
             if address < 0xC000:
                 offset = bank * 0x4000 + (address - 0x8000)
             else:
                 offset = ((bank + 1) % prg_banks_16k) * 0x4000 + (address - 0xC000)
         elif mode == 2:
+            # Fix first bank at $8000, switch bank at $C000.
             if address < 0xC000:
                 offset = address - 0x8000
             else:
                 bank = self.prg_bank_reg % prg_banks_16k
                 offset = bank * 0x4000 + (address - 0xC000)
         else:
+            # Switch bank at $8000, fix last bank at $C000.
             if address < 0xC000:
                 bank = self.prg_bank_reg % prg_banks_16k
                 offset = bank * 0x4000 + (address - 0x8000)
@@ -135,6 +183,10 @@ cdef class Mapper1:
 
         Returns:
             uint8_t: Byte from active CHR bank.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/MMC1
+            https://www.nesdev.org/wiki/PPU_pattern_tables
         """
         cdef int chr_len
         cdef int chr_mode
@@ -146,12 +198,15 @@ cdef class Mapper1:
 
         chr_mode = (self.control >> 4) & 0x01
         if chr_mode == 0:
+            # 8KB CHR banking with even bank alignment.
             bank = (self.chr_bank0 & 0x1E) * 0x1000
             offset = bank + (address & 0x1FFF)
         elif address < 0x1000:
+            # 4KB bank at $0000-$0FFF.
             bank = self.chr_bank0 * 0x1000
             offset = bank + address
         else:
+            # 4KB bank at $1000-$1FFF.
             bank = self.chr_bank1 * 0x1000
             offset = bank + (address - 0x1000)
 
@@ -170,10 +225,15 @@ cdef class Mapper1:
         Side Effects:
             Writes PRG-RAM in `$6000-$7FFF` and updates MMC1 serial register
             state for `$8000-$FFFF` control/bank writes.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/MMC1
+            https://www.nesdev.org/wiki/Mapper_001
         """
         cdef uint8_t reg_target, reg_val
 
         if 0x6000 <= address < 0x8000:
+            # MMC1 PRG-RAM write.
             self.prg_ram_view[address - 0x6000] = value
             return
 
@@ -181,17 +241,20 @@ cdef class Mapper1:
             return
 
         if value & 0x80:
+            # Bit7 reset clears shift register and forces sane control mode.
             self.shift_reg = 0
             self.shift_count = 0
             self.control |= 0x0C
             return
 
+        # Serially shift one bit at a time (LSB first).
         self.shift_reg |= (value & 1) << self.shift_count
         self.shift_count += 1
 
         if self.shift_count < 5:
             return
 
+        # After 5 writes, commit latched value to selected internal register.
         reg_val = self.shift_reg & 0x1F
         reg_target = (address >> 13) & 0x03
         if reg_target == 0:
@@ -215,13 +278,21 @@ cdef class Mapper1:
 
         Returns:
             None.
+
+        NESdev reference:
+            https://www.nesdev.org/wiki/MMC1
         """
         if len(self.chr_rom_view) > 0:
             self.chr_rom_view[address % len(self.chr_rom_view)] = value
 
 
 cdef class Mapper2:
-    """Mapper 2 (UxROM-like): switchable lower PRG bank with fixed CHR view."""
+    """Mapper 2 (UxROM-like): switchable lower PRG bank with fixed CHR view.
+
+    NESdev references:
+    - https://www.nesdev.org/wiki/Mapper_002
+    - https://www.nesdev.org/wiki/UxROM
+    """
 
     def __init__(self, prg_rom, chr_rom):
         """Initialize PRG/CHR storage and active PRG bank index.
@@ -232,6 +303,9 @@ cdef class Mapper2:
 
         Returns:
             None.
+
+        NESdev reference:
+            https://www.nesdev.org/wiki/UxROM
         """
         self.prg_rom = prg_rom
         self.chr_rom = chr_rom
@@ -247,6 +321,10 @@ cdef class Mapper2:
 
         Returns:
             uint8_t: Byte from selected PRG bank.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/UxROM
+            https://www.nesdev.org/wiki/CPU_memory_map
         """
         cdef int prg_banks_16k
         cdef int bank
@@ -257,9 +335,11 @@ cdef class Mapper2:
             return 0
 
         if address < 0xC000:
+            # Switchable low 16KB window.
             bank = self.prg_bank % prg_banks_16k
             offset = bank * 0x4000 + (address - 0x8000)
         else:
+            # Fixed high 16KB window points to last bank.
             bank = prg_banks_16k - 1
             offset = bank * 0x4000 + (address - 0xC000)
 
@@ -273,6 +353,9 @@ cdef class Mapper2:
 
         Returns:
             uint8_t: Byte from CHR storage.
+
+        NESdev reference:
+            https://www.nesdev.org/wiki/UxROM
         """
         return self.chr_rom_view[address % len(self.chr_rom_view)]
 
@@ -285,6 +368,10 @@ cdef class Mapper2:
 
         Returns:
             None.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/UxROM
+            https://www.nesdev.org/wiki/Mapper_002
         """
         cdef int prg_banks_16k
 
@@ -293,11 +380,17 @@ cdef class Mapper2:
             self.prg_bank = 0
             return
 
+        # UxROM typically uses lower nibble as bank selector.
         self.prg_bank = <uint8_t>((value & 0x0F) % prg_banks_16k)
 
 
 cdef class Mapper3:
-    """Mapper 3 (CNROM-like): fixed PRG with switchable CHR bank."""
+    """Mapper 3 (CNROM-like): fixed PRG with switchable CHR bank.
+
+    NESdev references:
+    - https://www.nesdev.org/wiki/Mapper_003
+    - https://www.nesdev.org/wiki/CNROM
+    """
 
     def __init__(self, prg_rom, chr_rom):
         """Initialize PRG/CHR buffers and CHR bank state.
@@ -308,6 +401,9 @@ cdef class Mapper3:
 
         Returns:
             None.
+
+        NESdev reference:
+            https://www.nesdev.org/wiki/CNROM
         """
         self.prg_rom = prg_rom
         self.chr_rom = chr_rom
@@ -323,6 +419,10 @@ cdef class Mapper3:
 
         Returns:
             uint8_t: Byte from fixed PRG mapping.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/CNROM
+            https://www.nesdev.org/wiki/CPU_memory_map
         """
         return self.prg_rom_view[address % len(self.prg_rom_view)]
 
@@ -334,6 +434,10 @@ cdef class Mapper3:
 
         Returns:
             uint8_t: Byte from selected CHR bank.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/CNROM
+            https://www.nesdev.org/wiki/PPU_pattern_tables
         """
         cdef int chr_banks_8k
         cdef int bank
@@ -344,6 +448,7 @@ cdef class Mapper3:
             return 0
 
         bank = self.chr_bank % chr_banks_8k
+        # CNROM maps one full 8KB CHR bank.
         offset = bank * 0x2000 + (address & 0x1FFF)
         return self.chr_rom_view[offset % len(self.chr_rom_view)]
 
@@ -356,6 +461,10 @@ cdef class Mapper3:
 
         Returns:
             None.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/CNROM
+            https://www.nesdev.org/wiki/Mapper_003
         """
         cdef int chr_banks_8k
 
@@ -364,11 +473,17 @@ cdef class Mapper3:
             self.chr_bank = 0
             return
 
+        # CNROM bank select usually in low bits.
         self.chr_bank = <uint8_t>((value & 0x1F) % chr_banks_8k)
 
 
 cdef class Mapper4:
-    """Mapper 4 (MMC3-like placeholder) with basic PRG/CHR bank selection."""
+    """Mapper 4 (MMC3-like placeholder) with basic PRG/CHR bank selection.
+
+    NESdev references:
+    - https://www.nesdev.org/wiki/Mapper_004
+    - https://www.nesdev.org/wiki/MMC3
+    """
 
     def __init__(self, prg_rom, chr_rom):
         """Initialize banked PRG/CHR state for mapper 4 emulation paths.
@@ -379,6 +494,9 @@ cdef class Mapper4:
 
         Returns:
             None.
+
+        NESdev reference:
+            https://www.nesdev.org/wiki/MMC3
         """
         self.prg_rom = prg_rom
         self.chr_rom = chr_rom
@@ -406,17 +524,22 @@ cdef class Mapper4:
     cdef void _clock_irq_a12(self, uint16_t address):
         cdef uint8_t a12
 
+        # MMC3 IRQ counter clocks on rising edges of PPU A12.
         a12 = 1 if (address & 0x1000) else 0
         if a12 and not self.last_a12:
             if self.irq_counter == 0 or self.irq_reload:
+                # Reload path copies latch into counter.
                 self.irq_counter = self.irq_latch
                 self.irq_reload = 0
             else:
+                # Normal path decrements counter.
                 self.irq_counter -= 1
 
             if self.irq_counter == 0 and self.irq_enable:
+                # Signal pending IRQ for CPU core to consume.
                 self.irq_pending = 1
 
+        # Track previous A12 level for edge detection.
         self.last_a12 = a12
 
     cpdef public uint8_t read_prg(self, uint16_t address):
@@ -427,6 +550,10 @@ cdef class Mapper4:
 
         Returns:
             uint8_t: Byte from selected PRG bank.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/MMC3
+            https://www.nesdev.org/wiki/CPU_memory_map
         """
         cdef int prg_banks_8k
         cdef int last_bank, last_bank2
@@ -442,12 +569,16 @@ cdef class Mapper4:
         b7 = self.bank_regs[7] % prg_banks_8k
 
         if address < 0xA000:
+            # $8000-$9FFF first 8KB slot depends on PRG mode.
             bank = last_bank2 if self.prg_mode else b6
         elif address < 0xC000:
+            # $A000-$BFFF always from bank register 7.
             bank = b7
         elif address < 0xE000:
+            # $C000-$DFFF swaps with first slot based on PRG mode.
             bank = b6 if self.prg_mode else last_bank2
         else:
+            # $E000-$FFFF fixed to last bank.
             bank = last_bank
 
         offset = bank * 0x2000 + (address & 0x1FFF)
@@ -461,6 +592,10 @@ cdef class Mapper4:
 
         Returns:
             uint8_t: Byte from selected CHR bank.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/MMC3
+            https://www.nesdev.org/wiki/PPU_pattern_tables
         """
         cdef int chr_banks_1k
         cdef int idx, bank, offset
@@ -476,6 +611,7 @@ cdef class Mapper4:
         r1 = self.bank_regs[1] & 0xFE
 
         if self.chr_mode == 0:
+            # Normal CHR mode: 2KB banks first, then four 1KB banks.
             if idx == 0:
                 bank = r0
             elif idx == 1:
@@ -487,6 +623,7 @@ cdef class Mapper4:
             else:
                 bank = self.bank_regs[idx + 2]
         else:
+            # Inverted CHR mode swaps 2KB and 1KB regions.
             if idx <= 3:
                 bank = self.bank_regs[idx + 2]
             elif idx == 4:
@@ -511,27 +648,39 @@ cdef class Mapper4:
 
         Returns:
             None.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/MMC3
+            https://www.nesdev.org/wiki/Mapper_004
         """
+        # Even/odd register addresses select command vs. payload semantics.
         if 0x8000 <= address < 0xA000:
             if (address & 1) == 0:
+                # Bank select register + PRG/CHR mode bits.
                 self.bank_select = value & 0x07
                 self.prg_mode = (value >> 6) & 1
                 self.chr_mode = (value >> 7) & 1
             else:
+                # Bank data write to selected register.
                 self.bank_regs[self.bank_select] = value
         elif 0xA000 <= address < 0xC000:
             if (address & 1) == 0:
+                # Mirroring control (only on boards that support it).
                 self.mirroring = value & 1
         elif 0xC000 <= address < 0xE000:
             if (address & 1) == 0:
+                # IRQ latch value.
                 self.irq_latch = value
             else:
+                # Request IRQ counter reload on next A12 edge.
                 self.irq_reload = 1
         elif 0xE000 <= address <= 0xFFFF:
             if (address & 1) == 0:
+                # IRQ disable + clear pending latch.
                 self.irq_enable = 0
                 self.irq_pending = 0
             else:
+                # IRQ enable.
                 self.irq_enable = 1
 
     cpdef public void write_chr(self, uint16_t address, uint8_t value):
@@ -543,6 +692,9 @@ cdef class Mapper4:
 
         Returns:
             None.
+
+        NESdev reference:
+            https://www.nesdev.org/wiki/MMC3
         """
         if len(self.chr_rom_view) > 0:
             self.chr_rom_view[address % len(self.chr_rom_view)] = value

@@ -3,6 +3,21 @@ import pygame
 cimport numpy as cnp
 from libc.stdint cimport uint8_t, uint16_t, uint32_t
 
+# Glossary (terms used in comments/docstrings in this file):
+# - APU: Audio Processing Unit.
+# - DMC: Delta Modulation Channel (sample playback channel in NES APU).
+# - IRQ: Interrupt Request (maskable CPU interrupt line).
+# - Frame counter: APU sequencer clocking envelopes/length/sweep units.
+# - Envelope: Automatic volume decay/gating unit per channel.
+# - LFSR: Linear Feedback Shift Register (noise generation core).
+# - DAC: Digital-to-Analog Converter output level (modeled numerically here).
+# - PCM: Pulse-Code Modulation sample buffer sent to host audio mixer.
+# NESdev references:
+# - https://www.nesdev.org/wiki/APU
+# - https://www.nesdev.org/wiki/APU_registers
+# - https://www.nesdev.org/wiki/APU_Frame_Counter
+# - https://www.nesdev.org/wiki/APU_DMC
+
 LENGTH_TABLE = (
     10, 254, 20, 2, 40, 4, 80, 6,
     160, 8, 60, 10, 14, 12, 26, 14,
@@ -26,6 +41,11 @@ cdef class APU:
 
     Implements channel register state machines and periodic sample emission to
     host audio backend.
+
+    NESdev references:
+    - https://www.nesdev.org/wiki/APU
+    - https://www.nesdev.org/wiki/APU_registers
+    - https://www.nesdev.org/wiki/APU_Frame_Counter
     """
 
     cdef public object cpu
@@ -124,7 +144,12 @@ cdef class APU:
         Raises:
             No exception is propagated for audio init failures; backend errors
             are swallowed to keep emulation running headless.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/APU
+            https://www.nesdev.org/wiki/APU_registers
         """
+        # Global APU timing and sample-rate conversion state.
         self.cycles = 0
         self.cpu = None
         self.cpu_clock_hz = 1789772.7272727273
@@ -223,6 +248,7 @@ cdef class APU:
         self.lp_prev = 0.0
 
         try:
+            # Bring up host audio backend if not already initialized.
             if not pygame.mixer.get_init():
                 pygame.mixer.init(frequency=self.sample_rate, size=-16, channels=1, buffer=512)
             mix_cfg = pygame.mixer.get_init()
@@ -234,11 +260,13 @@ cdef class APU:
             self.audio_channel.set_volume(1.0)
             self.audio_ready = True
         except Exception as e:
+            # Fail softly: keep emulation running without audio output.
             self.audio_ready = False
             self.audio_channel = None
             _ = e
 
     cdef double _duty_ratio(self, int duty_idx):
+        # NES pulse duty sequences reduced to average high-time ratios.
         if duty_idx == 0:
             return 0.125
         elif duty_idx == 1:
@@ -253,15 +281,18 @@ cdef class APU:
         cdef uint16_t timer
         cdef int delta, target
 
+        # Channel must be enabled and have non-zero length counter.
         if self.pulse_enabled[ch] == 0:
             return 0.0
         if self.pulse_length[ch] == 0:
             return 0.0
 
         timer = self.pulse_timer[ch]
+        # Hardware mutes pulse when timer period is too small.
         if timer < 8:
             return 0.0
 
+        # Sweep overflow/underflow mutes channel.
         if self.pulse_sweep_shift[ch] > 0:
             delta = timer >> self.pulse_sweep_shift[ch]
             if self.pulse_sweep_negate[ch]:
@@ -274,22 +305,28 @@ cdef class APU:
             if target < 0 or target > 0x7FF:
                 return 0.0
 
+        # Envelope output is either constant volume or decay value.
         if self.pulse_constant[ch]:
             env_out = self.pulse_volume[ch]
         else:
             env_out = self.pulse_env_decay[ch]
 
+        # Normalize 0..15 envelope into 0..1 range.
         vol = env_out / 15.0
 
         if vol <= 0.0:
             return 0.0
 
+        # Pulse frequency formula from timer period.
         freq = self.cpu_clock_hz / (16.0 * (timer + 1.0))
+        # Advance normalized phase according to host sample rate.
         step = freq / self.sample_rate
         self.pulse_phase[ch] += step
         if self.pulse_phase[ch] >= 1.0:
+            # Keep phase bounded to avoid floating-point blow-up.
             self.pulse_phase[ch] -= <int>self.pulse_phase[ch]
 
+        # Return bipolar square wave sample.
         duty = self._duty_ratio(self.pulse_duty[ch])
         if self.pulse_phase[ch] < duty:
             return vol
@@ -298,6 +335,7 @@ cdef class APU:
     cdef double _tri_sample(self):
         cdef double freq, step, amp, tri
 
+        # Triangle requires enable, valid timer, active length and linear counter.
         if self.tri_enabled == 0:
             return 0.0
         if self.tri_timer < 2:
@@ -307,12 +345,15 @@ cdef class APU:
         if self.tri_linear_counter == 0:
             return 0.0
 
+        # Triangle channel runs at CPU / (32*(timer+1)).
         freq = self.cpu_clock_hz / (32.0 * (self.tri_timer + 1.0))
         step = freq / self.sample_rate
         self.tri_phase += step
         if self.tri_phase >= 1.0:
+            # Wrap phase into [0,1).
             self.tri_phase -= <int>self.tri_phase
 
+        # Simple analytic triangle waveform approximation.
         tri = 1.0 - 4.0 * abs(self.tri_phase - 0.5)
         amp = 0.35
         return tri * amp
@@ -323,11 +364,13 @@ cdef class APU:
         cdef int period
         cdef uint16_t feedback
 
+        # Noise channel requires enable and non-zero length counter.
         if self.noise_enabled == 0:
             return 0.0
         if self.noise_length == 0:
             return 0.0
 
+        # Envelope source selection.
         if self.noise_constant:
             env_out = self.noise_volume
         else:
@@ -337,6 +380,7 @@ cdef class APU:
         if vol <= 0.0:
             return 0.0
 
+        # Convert period index into LFSR shift rate.
         period = NOISE_PERIOD_TABLE[self.noise_period_idx & 0x0F]
         if period <= 0:
             return 0.0
@@ -345,14 +389,18 @@ cdef class APU:
         step = freq / self.sample_rate
         self.noise_phase += step
 
+        # Advance LFSR whenever phase crosses integer boundary.
         while self.noise_phase >= 1.0:
             self.noise_phase -= 1.0
             if self.noise_mode:
+                # Short mode taps bit 6.
                 feedback = (self.noise_shift_reg ^ (self.noise_shift_reg >> 6)) & 1
             else:
+                # Normal mode taps bit 1.
                 feedback = (self.noise_shift_reg ^ (self.noise_shift_reg >> 1)) & 1
             self.noise_shift_reg = (self.noise_shift_reg >> 1) | (feedback << 14)
 
+        # Output is zero when LFSR bit0 is set.
         if self.noise_shift_reg & 1:
             return 0.0
         return (vol - 0.5) * 0.8
@@ -361,6 +409,7 @@ cdef class APU:
         cdef int addr
         cdef object mem
 
+        # Fetch only when transfer is active and sample buffer is empty.
         if self.dmc_bytes_remaining == 0:
             return
         if self.dmc_sample_buffer_empty == 0:
@@ -368,15 +417,18 @@ cdef class APU:
         if self.cpu is None:
             return
 
+        # DMC reads directly from CPU memory space.
         try:
             mem = self.cpu.memory
             addr = self.dmc_cur_addr & 0xFFFF
             self.dmc_sample_buffer = <uint8_t>int(mem[addr])
             self.dmc_sample_buffer_empty = 0
         except Exception:
+            # Keep playback moving even if read path fails.
             self.dmc_sample_buffer = 0
             self.dmc_sample_buffer_empty = 0
 
+        # Increment and wrap DMC source address.
         self.dmc_cur_addr = <uint16_t>((self.dmc_cur_addr + 1) & 0xFFFF)
         if self.dmc_cur_addr < 0x8000:
             self.dmc_cur_addr = 0x8000
@@ -384,6 +436,7 @@ cdef class APU:
         if self.dmc_bytes_remaining > 0:
             self.dmc_bytes_remaining -= 1
 
+        # End-of-sample behavior: loop or raise IRQ.
         if self.dmc_bytes_remaining == 0 and self.dmc_loop:
             self.dmc_cur_addr = self.dmc_sample_addr
             self.dmc_bytes_remaining = self.dmc_sample_len
@@ -391,6 +444,7 @@ cdef class APU:
             self.dmc_irq_flag = 1
             if self.cpu is not None:
                 try:
+                    # DMC IRQ is delivered as CPU IRQ line.
                     self.cpu.trigger_interrupt(1)
                 except Exception:
                     pass
@@ -398,24 +452,29 @@ cdef class APU:
     cdef void _clock_dmc(self, uint32_t cpu_cycles):
         cdef int period
 
+        # DMC advances in CPU-cycle domain using rate table periods.
         if self.dmc_enabled == 0:
             return
 
         period = DMC_RATE_TABLE[self.dmc_rate_idx & 0x0F]
         self.dmc_cycle_acc += cpu_cycles
 
+        # Consume as many DMC ticks as elapsed cycles allow.
         while self.dmc_cycle_acc >= period:
             self.dmc_cycle_acc -= period
 
             if self.dmc_bits_remaining == 0:
                 if self.dmc_sample_buffer_empty == 0:
+                    # Load next byte into shift register.
                     self.dmc_shift_reg = self.dmc_sample_buffer
                     self.dmc_sample_buffer_empty = 1
                     self.dmc_bits_remaining = 8
                 else:
+                    # Silence path keeps bit timer moving.
                     self.dmc_bits_remaining = 8
 
             if self.dmc_bits_remaining > 0:
+                # Bit=1 raises DAC level, bit=0 lowers DAC level.
                 if self.dmc_shift_reg & 1:
                     if self.dmc_output_level <= 125:
                         self.dmc_output_level += 2
@@ -426,16 +485,20 @@ cdef class APU:
                 self.dmc_shift_reg >>= 1
                 self.dmc_bits_remaining -= 1
 
+            # Request next source byte when needed.
             self._dmc_fetch_byte()
 
     cdef double _dmc_sample(self):
+        # Convert 7-bit DMC DAC level to centered audio contribution.
         return (self.dmc_output_level / 127.0) * 0.4 - 0.2
 
     cdef void _clock_quarter_frame(self):
         cdef int ch
 
+        # Quarter-frame clocks pulse envelopes.
         for ch in range(2):
             if self.pulse_env_start[ch]:
+                # Envelope restart on register write.
                 self.pulse_env_start[ch] = 0
                 self.pulse_env_decay[ch] = 15
                 self.pulse_env_divider[ch] = self.pulse_volume[ch]
@@ -445,18 +508,22 @@ cdef class APU:
                     if self.pulse_env_decay[ch] > 0:
                         self.pulse_env_decay[ch] -= 1
                     elif self.pulse_env_loop[ch]:
+                        # Looping envelope wraps back to 15.
                         self.pulse_env_decay[ch] = 15
                 else:
                     self.pulse_env_divider[ch] -= 1
 
+        # Triangle linear counter clock.
         if self.tri_reload_flag:
             self.tri_linear_counter = self.tri_linear_reload
         elif self.tri_linear_counter > 0:
             self.tri_linear_counter -= 1
 
+        # Clear reload flag if control (halt) is not set.
         if self.tri_control == 0:
             self.tri_reload_flag = 0
 
+        # Noise envelope clock.
         if self.noise_env_start:
             self.noise_env_start = 0
             self.noise_env_decay = 15
@@ -474,17 +541,20 @@ cdef class APU:
     cdef void _clock_half_frame(self):
         cdef int ch, delta, target
 
+        # Half-frame clocks length counters and pulse sweep units.
         for ch in range(2):
             if self.pulse_env_loop[ch] == 0 and self.pulse_length[ch] > 0:
                 self.pulse_length[ch] -= 1
 
             if self.pulse_sweep_reload[ch]:
+                # Sweep reload primes divider.
                 self.pulse_sweep_divider[ch] = self.pulse_sweep_period[ch]
                 self.pulse_sweep_reload[ch] = 0
             else:
                 if self.pulse_sweep_divider[ch] > 0:
                     self.pulse_sweep_divider[ch] -= 1
                 else:
+                    # Apply sweep when divider expires.
                     self.pulse_sweep_divider[ch] = self.pulse_sweep_period[ch]
                     if self.pulse_sweep_enable[ch] and self.pulse_sweep_shift[ch] > 0:
                         if self.pulse_timer[ch] >= 8:
@@ -499,6 +569,7 @@ cdef class APU:
                             if 0 <= target <= 0x7FF:
                                 self.pulse_timer[ch] = <uint16_t>target
 
+        # Triangle/noise length clocks when halt/loop not asserted.
         if self.tri_control == 0 and self.tri_length > 0:
             self.tri_length -= 1
 
@@ -509,6 +580,7 @@ cdef class APU:
         cdef int seq_len, e1, e2, e3, e4
         cdef int old_pos, new_pos, step, remaining
 
+        # Sequence points for 4-step or 5-step frame counter modes.
         if self.frame_mode_5step:
             seq_len = 18641
             e1 = 3729
@@ -522,6 +594,7 @@ cdef class APU:
             e3 = 11186
             e4 = 14915
 
+        # Walk elapsed CPU cycles through frame sequencer events.
         remaining = <int>cpu_cycles
         while remaining > 0:
             old_pos = self.frame_cycle_pos
@@ -530,6 +603,7 @@ cdef class APU:
                 step = remaining
             new_pos = old_pos + step
 
+            # Quarter-frame events.
             if old_pos < e1 <= new_pos:
                 self._clock_quarter_frame()
             if old_pos < e2 <= new_pos:
@@ -539,11 +613,13 @@ cdef class APU:
             if old_pos < e4 <= new_pos:
                 self._clock_quarter_frame()
 
+            # Half-frame events.
             if old_pos < e2 <= new_pos:
                 self._clock_half_frame()
             if old_pos < e4 <= new_pos:
                 self._clock_half_frame()
 
+            # 4-step mode can raise frame IRQ at end of sequence.
             if self.frame_mode_5step == 0 and old_pos < e4 <= new_pos and self.frame_irq_inhibit == 0:
                 self.frame_irq_flag = 1
                 if self.cpu is not None:
@@ -552,6 +628,7 @@ cdef class APU:
                     except Exception:
                         pass
 
+            # Wrap sequence cursor at end of frame-counter period.
             if new_pos >= seq_len:
                 self.frame_cycle_pos = 0
             else:
@@ -560,6 +637,7 @@ cdef class APU:
             remaining -= step
 
     cdef void _advance_frame_reload_delay(self, uint32_t cpu_cycles):
+        # $4017 writes apply after 3 or 4 CPU cycles.
         if self.frame_reload_pending == 0:
             return
 
@@ -572,12 +650,14 @@ cdef class APU:
         self.frame_cycle_pos = 0
 
         if self.frame_mode_5step:
+            # 5-step mode clocks quarter+half immediately on reload.
             self._clock_quarter_frame()
             self._clock_half_frame()
 
     cpdef public uint8_t read_status(self):
         cdef uint8_t status
 
+        # Report active length counters and pending IRQ flags.
         status = 0
         if self.pulse_length[0] > 0:
             status |= 0x01
@@ -594,6 +674,7 @@ cdef class APU:
         if self.dmc_irq_flag:
             status |= 0x80
 
+        # Reading status clears frame IRQ flag (not DMC IRQ).
         self.frame_irq_flag = 0
         return status
 
@@ -602,26 +683,32 @@ cdef class APU:
         cdef object snd, mix_cfg, pcm_out
         cdef object queued
 
+        # If audio backend is unavailable, keep buffer bounded by dropping data.
         if not self.audio_ready:
             self.sample_buffer.clear()
             return
 
+        # Wait until enough samples are collected for one chunk.
         if len(self.sample_buffer) < self.buffer_target:
             return
 
+        # Avoid queueing too far ahead when channel is busy.
         if self.audio_channel is not None and self.audio_channel.get_busy() and self.audio_channel.get_queue() is not None:
             return
 
+        # Convert python list of samples into int16 PCM block.
         pcm = np.asarray(self.sample_buffer, dtype=np.int16)
         self.sample_buffer = []
 
         try:
             mix_cfg = pygame.mixer.get_init()
             if mix_cfg is not None and len(mix_cfg) >= 3 and int(mix_cfg[2]) == 2:
+                # Duplicate mono stream into stereo when mixer is stereo.
                 pcm_out = np.column_stack((pcm, pcm))
             else:
                 pcm_out = pcm
 
+            # Submit sound chunk to pygame mixer channel.
             snd = pygame.sndarray.make_sound(pcm_out)
             if self.audio_channel is None:
                 self.audio_channel = pygame.mixer.Channel(0)
@@ -629,8 +716,10 @@ cdef class APU:
             if self.audio_channel.get_busy():
                 queued = self.audio_channel.get_queue()
                 if queued is None:
+                    # Queue next block for gap-free playback.
                     self.audio_channel.queue(snd)
             else:
+                # Start playback immediately if channel is idle.
                 self.audio_channel.play(snd)
         except Exception as e:
             if not self.audio_error_reported:
@@ -649,17 +738,23 @@ cdef class APU:
         Side Effects:
             Advances frame counter and channel clocks, appends synthesized PCM
             samples to internal buffer, and may queue/play audio chunks.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/APU_Frame_Counter
+            https://www.nesdev.org/wiki/APU_Mixer
         """
         cdef double mix
         cdef double filtered
         cdef int sample_i16
 
+        # Advance core counters in CPU-cycle domain.
         self.cycles += cpu_cycles
         self.sample_cycle_acc += cpu_cycles
         self._advance_frame_reload_delay(cpu_cycles)
         self._clock_dmc(cpu_cycles)
         self._clock_frame_counter(cpu_cycles)
 
+        # Emit as many host samples as current cycle accumulator allows.
         while self.sample_cycle_acc >= self.cycles_per_sample:
             self.sample_cycle_acc -= self.cycles_per_sample
 
@@ -689,6 +784,7 @@ cdef class APU:
             sample_i16 = <int>(self.lp_prev * 9000.0)
             self.sample_buffer.append(sample_i16)
 
+        # Push buffered PCM to pygame mixer when enough samples are ready.
         self._emit_audio_if_needed()
 
     cpdef public void write(self, uint16_t addr, uint8_t value):
@@ -704,9 +800,14 @@ cdef class APU:
         Side Effects:
             Mutates channel envelopes/timers/length counters, enable bits, DMC
             transfer state, and frame-counter mode/reload timing.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/APU_registers
+            https://www.nesdev.org/wiki/APU_Frame_Counter
         """
         cdef int ch
 
+        # Pulse 1 control/timer registers.
         if addr == 0x4000:
             self.pulse_duty[0] = (value >> 6) & 0x03
             self.pulse_constant[0] = 1 if (value & 0x10) else 0
@@ -724,6 +825,7 @@ cdef class APU:
             return
 
         elif addr == 0x4001:
+            # Pulse 1 sweep unit.
             self.pulse_sweep_enable[0] = 1 if (value & 0x80) else 0
             self.pulse_sweep_period[0] = (value >> 4) & 0x07
             self.pulse_sweep_negate[0] = 1 if (value & 0x08) else 0
@@ -748,6 +850,7 @@ cdef class APU:
             return
 
         elif addr == 0x4005:
+            # Pulse 2 sweep unit.
             self.pulse_sweep_enable[1] = 1 if (value & 0x80) else 0
             self.pulse_sweep_period[1] = (value >> 4) & 0x07
             self.pulse_sweep_negate[1] = 1 if (value & 0x08) else 0
@@ -769,6 +872,7 @@ cdef class APU:
             self.tri_phase = 0.0
             return
 
+        # Noise channel envelope/period/length.
         elif addr == 0x400C:
             self.noise_env_loop = 1 if (value & 0x20) else 0
             self.noise_constant = 1 if (value & 0x10) else 0
@@ -783,6 +887,7 @@ cdef class APU:
             self.noise_env_start = 1
             return
 
+        # DMC setup registers.
         elif addr == 0x4010:
             self.dmc_irq_enable = 1 if (value & 0x80) else 0
             self.dmc_loop = 1 if (value & 0x40) else 0
@@ -798,6 +903,7 @@ cdef class APU:
             self.dmc_sample_len = <uint16_t>(value * 16 + 1)
             return
 
+        # Global channel enable/status register.
         elif addr == 0x4015:
             self.dmc_irq_flag = 0
             for ch in range(2):
@@ -820,6 +926,7 @@ cdef class APU:
                 self.dmc_bytes_remaining = 0
             return
 
+        # Frame counter mode and IRQ inhibit control.
         elif addr == 0x4017:
             self.frame_irq_inhibit = 1 if (value & 0x40) else 0
             if self.frame_irq_inhibit:
