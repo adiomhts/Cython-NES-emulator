@@ -1,13 +1,33 @@
-*
-*/
----
-!*.pyx
-!*.pxd
-!.*
----
-!main.py
-!nes.py
-!setup.py
----
-!example.gif
-!requirements.txt
+﻿# Python caches / envs
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Cython / native build artifacts
+build/
+dist/
+*.c
+*.cpp
+*.pyd
+*.so
+*.dll
+*.exp
+*.lib
+*.html
+
+# Tooling and local app state
+.vscode/
+.cython_nes_recent_games.json
+
+# Runtime/debug outputs
+*.png
+log.txt
+
+# ROM files and temporary data
+roms/
+temp/
+nesdev_wiki_offline/
+
+# Keep source tree tracked by default
+SMBDIS.ASM

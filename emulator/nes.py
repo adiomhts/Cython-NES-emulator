@@ -39,7 +39,7 @@ class NES:
         """Initialize emulator subsystems and load the selected ROM.
 
         Args:
-            rom_path: Path to a `.nes` ROM file.
+            rom_path: Path to a '.nes' ROM file.
 
         Returns:
             None.
@@ -47,7 +47,7 @@ class NES:
         Side Effects:
             Initializes pygame, creates an output window, loads cartridge data,
             wires CPU/PPU/APU/controller references, maps CHR data into PPU
-            context, and resets CPU state through `load_rom`.
+            context, and resets CPU state through 'load_rom'.
 
         Raises:
             ValueError: If cartridge parser rejects the ROM format.
@@ -62,6 +62,8 @@ class NES:
         pygame.init()
         self.screen = pygame.display.set_mode((256, 240))
         pygame.display.set_caption("NES Emulator")
+        self.base_width = 256
+        self.base_height = 240
         
         # Parse ROM, iNES header, mapper info, and PRG/CHR payloads.
         self.cartridge = Cartridge(rom_path) 
@@ -112,17 +114,17 @@ class NES:
             None.
 
         Returns:
-            str: Path to `.sav` file located next to the ROM.
+            str: Path to '.sav' file located next to the ROM.
 
         NESdev reference:
             https://www.nesdev.org/wiki/INES#Flags_6
         """
-        # Save file is colocated with ROM and uses `.sav` extension.
+        # Save file is colocated with ROM and uses '.sav' extension.
         base, _ = os.path.splitext(self.rom_path)
         return base + ".sav"
 
     def _load_battery_ram(self):
-        """Load battery-backed PRG RAM from disk into `$6000-$7FFF`.
+        """Load battery-backed PRG RAM from disk into '$6000-$7FFF'.
 
         Args:
             None.
@@ -131,7 +133,7 @@ class NES:
             None.
 
         Side Effects:
-            Reads save data from `.sav` file and writes it to CPU RAM window.
+            Reads save data from '.sav' file and writes it to CPU RAM window.
 
         NESdev references:
             https://www.nesdev.org/wiki/CPU_memory_map
@@ -165,7 +167,7 @@ class NES:
                 self.cpu.memory[0x6000:0x6000 + len(raw)] = list(raw)
 
     def save_battery_ram(self):
-        """Persist battery-backed PRG RAM from `$6000-$7FFF` to disk.
+        """Persist battery-backed PRG RAM from '$6000-$7FFF' to disk.
 
         Args:
             None.
@@ -174,7 +176,7 @@ class NES:
             None.
 
         Side Effects:
-            Writes 8KB PRG RAM snapshot to `.sav` file for battery carts.
+            Writes 8KB PRG RAM snapshot to '.sav' file for battery carts.
 
         NESdev references:
             https://www.nesdev.org/wiki/INES#Flags_6
@@ -229,7 +231,7 @@ class NES:
             None.
 
         Side Effects:
-            Writes into CPU memory region `$8000-$FFFF` and calls `CPU.reset()`.
+            Writes into CPU memory region '$8000-$FFFF' and calls 'CPU.reset()'.
 
         Raises:
             ValueError: If mapper id is not implemented.
@@ -281,17 +283,23 @@ class NES:
         # Reset vectors/program counter are reloaded after mapping is ready.
         self.cpu.reset()
 
-    def render_screen(self):
+    def render_screen(self, target_surface=None, dest_rect=None, flip=False):
         """Present current PPU framebuffer to the host window.
 
         Args:
-            None.
+            target_surface: Optional pygame surface to draw into. If 'None',
+                uses 'self.screen'.
+            dest_rect: Optional destination rectangle. If provided, frame is
+                scaled to this rectangle while preserving caller-chosen layout.
+            flip: If 'True', calls 'pygame.display.flip()' after blit.
 
         Returns:
-            None.
+            pygame.Surface: Unscaled frame surface built from current PPU RGB
+            framebuffer.
 
         Side Effects:
-            Blits a pygame surface and flips the display buffer.
+            Blits a pygame surface to the selected target and optionally flips
+            the display buffer.
 
         NESdev references:
             https://www.nesdev.org/wiki/PPU_rendering
@@ -299,15 +307,27 @@ class NES:
         """
         # Convert internal RGB frame buffer (numpy-like) to pygame surface.
         surface = pygame.surfarray.make_surface(self.ppu.frame_buffer.swapaxes(0, 1))
-        # Copy frame to the screen backbuffer and present it.
-        self.screen.blit(surface, (0, 0))
-        pygame.display.flip()
 
-    def run_frame(self):
+        if target_surface is None:
+            target_surface = self.screen
+
+        if dest_rect is None:
+            target_surface.blit(surface, (0, 0))
+        else:
+            scaled = pygame.transform.smoothscale(surface, (dest_rect.width, dest_rect.height))
+            target_surface.blit(scaled, dest_rect.topleft)
+
+        if flip:
+            pygame.display.flip()
+
+        return surface
+
+    def run_frame(self, present=True):
         """Run one emulated NTSC frame.
 
         Args:
-            None.
+            present: If 'True', presents the rendered frame to display at end
+                of frame; if 'False', only advances emulation state.
 
         Returns:
             None.
@@ -345,4 +365,5 @@ class NES:
             frame_cycles += cycles_diff
             
         # Present frame once CPU/PPU/APU are advanced to frame boundary.
-        self.render_screen()
+        if present:
+            self.render_screen(flip=True)

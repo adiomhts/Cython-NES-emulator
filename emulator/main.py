@@ -1,6 +1,6 @@
 import pygame
 import sys
-from emulator.nes import NES
+from nes import NES
 from controls_config import BUTTON_ORDER, DEFAULT_CONTROL_NAMES, load_control_names
 
 # Glossary (terms used in comments/docstrings in this file):

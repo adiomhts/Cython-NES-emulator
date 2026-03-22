@@ -1,0 +1,22 @@
+{
+  "P1": {
+    "A": "z",
+    "B": "x",
+    "SELECT": "right shift",
+    "START": "return",
+    "UP": "up",
+    "DOWN": "down",
+    "LEFT": "left",
+    "RIGHT": "right"
+  },
+  "P2": {
+    "A": "u",
+    "B": "o",
+    "SELECT": "right ctrl",
+    "START": "right alt",
+    "UP": "i",
+    "DOWN": "k",
+    "LEFT": "j",
+    "RIGHT": "l"
+  }
+}

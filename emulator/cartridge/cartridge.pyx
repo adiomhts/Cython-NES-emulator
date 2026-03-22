@@ -1,14 +1,17 @@
 import numpy as np
 cimport numpy as cnp
 from libc.stdint cimport uint8_t, uint16_t
-from mappers cimport Mapper0, Mapper1, Mapper2, Mapper3, Mapper4
+from mappers import Mapper0, Mapper1, Mapper2, Mapper3, Mapper4
 
 # Glossary (terms used in comments/docstrings in this file):
-# - iNES: Common `.nes` ROM container/header format.
+# - iNES: Common '.nes' ROM container/header format.
 # - PRG: Program area (CPU-visible cartridge ROM/RAM banks).
 # - CHR: Pattern table area (PPU-visible graphics ROM/RAM banks).
 # - Mirroring: Nametable wiring mode (horizontal/vertical).
 # - Mapper: Cartridge bank-switching and optional IRQ hardware id/logic.
+# - Bank: Fixed-size chunk selected into an address window.
+# - CHR RAM: Writable graphics memory used when cartridge has no CHR ROM.
+# - Header flags: Control bits in iNES header bytes (trainer/mirroring/battery/etc.).
 # NESdev references:
 # - https://www.nesdev.org/wiki/INES
 # - https://www.nesdev.org/wiki/Mapper
@@ -33,7 +36,7 @@ cdef class Cartridge:
     cdef public object mapper_instance
 
     def __init__(self, file_path: str):
-        """Load and parse a `.nes` ROM file.
+        """Load and parse a '.nes' ROM file.
 
         Args:
             file_path: Path to ROM file in iNES format.
@@ -69,7 +72,7 @@ cdef class Cartridge:
         self.mirroring = data[6] & 1
         self.battery_backed = 1 if (data[6] & 0x02) else 0
         
-        # Mapper number combines high nibbles from flags 6 and 7.
+        # Mapper number combines high nibbles from header flags 6 and 7.
         self.mapper = ((data[6] >> 4) | ((data[7] & 0xF0) >> 4))
 
         # PRG is 16KB per bank; CHR is 8KB per bank.
@@ -113,7 +116,7 @@ cdef class Cartridge:
             None.
 
         Side Effects:
-            Assigns `self.mapper_instance` with one of the supported mapper
+            Assigns 'self.mapper_instance' with one of the supported mapper
             classes.
 
         Raises:

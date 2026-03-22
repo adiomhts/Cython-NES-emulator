@@ -83,6 +83,11 @@ python setup.py build_ext --inplace
 python main.py rom.nes
 ```
 
+# Optional Qt launcher (ROM picker + recent games)
+``` bash
+python qt_launcher.py
+```
+
 ## 👨‍💻 Author
 
 **Adil Abuzyarov** Computer Science Student at Palacký University Olomouc  

@@ -1,9 +1,11 @@
 from libc.stdint cimport uint8_t
 
 # Glossary (terms used in comments/docstrings in this file):
-# - Strobe: Controller latch mode controlled by bit0 writes to `$4016`.
+# - Strobe: Controller latch mode controlled by bit0 writes to '$4016'.
 # - Shift register: Serial output register read bit-by-bit by CPU.
 # - Open bus: Hardware behavior where unrelated bits may retain prior state.
+# - Latch: Snapshot of current button states captured for serial reads.
+# - Polling: CPU repeatedly reading controller bits every frame.
 # NESdev references:
 # - https://www.nesdev.org/wiki/Controller_reading
 # - https://www.nesdev.org/wiki/Standard_controller
@@ -12,7 +14,7 @@ cdef class Controller:
     """NES standard controller serial latch and shift-register behavior.
 
     Emulates the strobe/write and serial read behavior used through register
-    `$4016`.
+    '$4016'.
 
     NESdev references:
     - https://www.nesdev.org/wiki/Controller_reading
@@ -50,13 +52,13 @@ cdef class Controller:
 
         Args:
             buttons_state: Sequence-like list of at least 8 truthy/falsy values
-                in NES order `[A, B, Select, Start, Up, Down, Left, Right]`.
+                in NES order '[A, B, Select, Start, Up, Down, Left, Right]'.
 
         Returns:
             None.
 
         Side Effects:
-            Packs host input into `buttons` bitfield and, when strobe is active,
+            Packs host input into 'buttons' bitfield and, when strobe is active,
             updates the exposed shift register immediately.
 
         NESdev references:
@@ -88,7 +90,7 @@ cdef class Controller:
             self.shift_reg = self.buttons
 
     cpdef public void write(self, uint8_t value):
-        """Handle CPU write to controller strobe register `$4016`.
+        """Handle CPU write to controller strobe register '$4016'.
 
         Args:
             value: Raw 8-bit value written by CPU; bit 0 controls strobe.
@@ -98,7 +100,7 @@ cdef class Controller:
 
         Side Effects:
             Updates strobe mode and latches current button state into
-            `shift_reg` when required.
+            'shift_reg' when required.
 
         NESdev references:
             https://www.nesdev.org/wiki/Controller_reading
@@ -122,10 +124,10 @@ cdef class Controller:
 
         Returns:
             uint8_t: Value with bit 0 set to current controller serial output
-            and open-bus style high bits represented as `0x40`.
+            and open-bus style high bits represented as '0x40'.
 
         Side Effects:
-            In non-strobe mode, shifts `shift_reg` right after each read.
+            In non-strobe mode, shifts 'shift_reg' right after each read.
 
         NESdev references:
             https://www.nesdev.org/wiki/Controller_reading
