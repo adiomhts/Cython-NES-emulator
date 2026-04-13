@@ -7,6 +7,11 @@
 # - https://www.nesdev.org/wiki/PPU_registers
 # - https://www.nesdev.org/wiki/PPU_scrolling
 
+# IDE Static Analysis Hints
+if not "PPU" in globals():
+    from ppu cimport PPU
+    from libc.stdint cimport uint8_t, uint16_t, uint32_t
+
 cpdef void ppu_write_register(PPU self, uint16_t reg, uint8_t value):
     """Handles CPU writes to the eight memory-mapped PPU registers.
 

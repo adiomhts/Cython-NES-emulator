@@ -9,6 +9,15 @@
 # - https://www.nesdev.org/wiki/APU_registers
 # - https://www.nesdev.org/wiki/APU_Frame_Counter
 
+# IDE Static Analysis Hints
+if not "APU" in globals():
+    from apu cimport APU, apu_filter_to_i16, apu_mix_channels, LENGTH_TABLE
+    from libc.stdint cimport uint8_t, uint16_t, uint32_t
+    import numpy as np
+    import pygame
+    cimport numpy as cnp
+
+
 cpdef uint8_t apu_read_status(APU self):
     """Return current APU status register value.
 
@@ -122,11 +131,18 @@ def apu_step(APU self, uint32_t cpu_cycles):
     """
     cdef int sample_i16
 
+    cdef uint32_t i
+
     self.cycles += cpu_cycles
     self.sample_cycle_acc += cpu_cycles
-    self._advance_frame_reload_delay(cpu_cycles)
-    self._clock_dmc(cpu_cycles)
-    self._clock_frame_counter(cpu_cycles)
+
+    # Keep frame-sequencer timing cycle-accurate: a pending $4017 reload can
+    # expire mid-instruction, so advancing in a single chunk can shift IRQ/
+    # quarter/half events too early or too late.
+    for i in range(cpu_cycles):
+        self._advance_frame_reload_delay(1)
+        self._clock_dmc(1)
+        self._clock_frame_counter(1)
 
     while self.sample_cycle_acc >= self.cycles_per_sample:
         self.sample_cycle_acc -= self.cycles_per_sample
@@ -169,7 +185,8 @@ cpdef void apu_write(APU self, uint16_t addr, uint8_t value):
         return
     elif addr == 0x4003:
         self.pulse_timer[0] = (self.pulse_timer[0] & 0x00FF) | ((value & 0x07) << 8)
-        self.pulse_length[0] = LENGTH_TABLE[(value >> 3) & 0x1F]
+        if self.pulse_enabled[0]:
+            self.pulse_length[0] = LENGTH_TABLE[(value >> 3) & 0x1F]
         self.pulse_env_start[0] = 1
         self.pulse_phase[0] = 0.0
         return
@@ -193,7 +210,8 @@ cpdef void apu_write(APU self, uint16_t addr, uint8_t value):
         return
     elif addr == 0x4007:
         self.pulse_timer[1] = (self.pulse_timer[1] & 0x00FF) | ((value & 0x07) << 8)
-        self.pulse_length[1] = LENGTH_TABLE[(value >> 3) & 0x1F]
+        if self.pulse_enabled[1]:
+            self.pulse_length[1] = LENGTH_TABLE[(value >> 3) & 0x1F]
         self.pulse_env_start[1] = 1
         self.pulse_phase[1] = 0.0
         return
@@ -215,7 +233,8 @@ cpdef void apu_write(APU self, uint16_t addr, uint8_t value):
         return
     elif addr == 0x400B:
         self.tri_timer = (self.tri_timer & 0x00FF) | ((value & 0x07) << 8)
-        self.tri_length = LENGTH_TABLE[(value >> 3) & 0x1F]
+        if self.tri_enabled:
+            self.tri_length = LENGTH_TABLE[(value >> 3) & 0x1F]
         self.tri_reload_flag = 1
         self.tri_phase = 0.0
         return
@@ -230,12 +249,15 @@ cpdef void apu_write(APU self, uint16_t addr, uint8_t value):
         self.noise_period_idx = value & 0x0F
         return
     elif addr == 0x400F:
-        self.noise_length = LENGTH_TABLE[(value >> 3) & 0x1F]
+        if self.noise_enabled:
+            self.noise_length = LENGTH_TABLE[(value >> 3) & 0x1F]
         self.noise_env_start = 1
         return
 
     elif addr == 0x4010:
         self.dmc_irq_enable = 1 if (value & 0x80) else 0
+        if self.dmc_irq_enable == 0:
+            self.dmc_irq_flag = 0
         self.dmc_loop = 1 if (value & 0x40) else 0
         self.dmc_rate_idx = value & 0x0F
         return
@@ -266,15 +288,19 @@ cpdef void apu_write(APU self, uint16_t addr, uint8_t value):
             if self.dmc_bytes_remaining == 0:
                 self.dmc_cur_addr = self.dmc_sample_addr
                 self.dmc_bytes_remaining = self.dmc_sample_len
+                self.dmc_bits_remaining = 4
+                self.dmc_cycle_acc = -4.0
                 self._dmc_fetch_byte()
         else:
             self.dmc_bytes_remaining = 0
         return
 
     elif addr == 0x4017:
+        self.frame_last_write = value
         self.frame_irq_inhibit = 1 if (value & 0x40) else 0
         if self.frame_irq_inhibit:
             self.frame_irq_flag = 0
+            self.frame_irq_retrigger = 0
         self.frame_reload_pending = 1
         self.frame_reload_mode_5step = 1 if (value & 0x80) else 0
         self.frame_reload_delay = 3 if (self.cycles & 1) else 4

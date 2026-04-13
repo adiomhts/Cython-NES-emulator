@@ -56,87 +56,8 @@ cdef class APU:
     - https://www.nesdev.org/wiki/APU
     - https://www.nesdev.org/wiki/APU_registers
     - https://www.nesdev.org/wiki/APU_Frame_Counter
+    - https://www.nesdev.org/wiki/APU_DMC
     """
-
-    cdef public object cpu
-    cdef uint32_t cycles
-    cdef double cpu_clock_hz
-    cdef int sample_rate
-    cdef int mixer_channels
-    cdef double cycles_per_sample
-    cdef double sample_cycle_acc
-    cdef int frame_mode_5step
-    cdef int frame_cycle_pos
-    cdef int frame_reload_pending
-    cdef int frame_reload_delay
-    cdef int frame_reload_mode_5step
-    cdef uint8_t frame_irq_inhibit
-    cdef uint8_t frame_irq_flag
-    cdef uint8_t dmc_irq_flag
-
-    cdef uint8_t pulse_enabled[2]
-    cdef uint8_t pulse_duty[2]
-    cdef uint8_t pulse_volume[2]
-    cdef uint8_t pulse_constant[2]
-    cdef uint8_t pulse_env_loop[2]
-    cdef uint8_t pulse_env_start[2]
-    cdef uint8_t pulse_env_divider[2]
-    cdef uint8_t pulse_env_decay[2]
-    cdef uint8_t pulse_length[2]
-    cdef uint8_t pulse_sweep_enable[2]
-    cdef uint8_t pulse_sweep_period[2]
-    cdef uint8_t pulse_sweep_negate[2]
-    cdef uint8_t pulse_sweep_shift[2]
-    cdef uint8_t pulse_sweep_reload[2]
-    cdef uint8_t pulse_sweep_divider[2]
-    cdef uint16_t pulse_timer[2]
-    cdef double pulse_phase[2]
-
-    cdef uint8_t tri_enabled
-    cdef uint8_t tri_control
-    cdef uint8_t tri_linear_reload
-    cdef uint8_t tri_linear_counter
-    cdef uint8_t tri_reload_flag
-    cdef uint8_t tri_length
-    cdef uint16_t tri_timer
-    cdef double tri_phase
-
-    cdef uint8_t noise_enabled
-    cdef uint8_t noise_constant
-    cdef uint8_t noise_env_loop
-    cdef uint8_t noise_volume
-    cdef uint8_t noise_env_start
-    cdef uint8_t noise_env_divider
-    cdef uint8_t noise_env_decay
-    cdef uint8_t noise_length
-    cdef uint8_t noise_mode
-    cdef uint8_t noise_period_idx
-    cdef uint16_t noise_shift_reg
-    cdef double noise_phase
-
-    cdef uint8_t dmc_enabled
-    cdef uint8_t dmc_loop
-    cdef uint8_t dmc_irq_enable
-    cdef uint8_t dmc_rate_idx
-    cdef uint8_t dmc_output_level
-    cdef uint16_t dmc_sample_addr
-    cdef uint16_t dmc_cur_addr
-    cdef uint16_t dmc_sample_len
-    cdef uint16_t dmc_bytes_remaining
-    cdef uint8_t dmc_shift_reg
-    cdef uint8_t dmc_bits_remaining
-    cdef uint8_t dmc_sample_buffer
-    cdef uint8_t dmc_sample_buffer_empty
-    cdef double dmc_cycle_acc
-
-    cdef bint audio_ready
-    cdef bint audio_error_reported
-    cdef object audio_channel
-    cdef object sample_buffer
-    cdef int buffer_target
-    cdef double hp_prev_in
-    cdef double hp_prev_out
-    cdef double lp_prev
 
     def __init__(self):
         """Initialize APU channel state and host audio backend.
@@ -172,10 +93,13 @@ cdef class APU:
         self.frame_reload_pending = 0
         self.frame_reload_delay = 0
         self.frame_reload_mode_5step = 0
+        self.frame_last_write = 0x00
         self.frame_irq_inhibit = 0
         self.frame_irq_flag = 0
+        self.frame_irq_retrigger = 0
         self.dmc_irq_flag = 0
 
+        # Channel enables follow $4015 state; start disabled until software writes.
         self.pulse_enabled[0] = 0
         self.pulse_enabled[1] = 0
         self.pulse_duty[0] = 0
@@ -274,6 +198,9 @@ cdef class APU:
             self.audio_ready = False
             self.audio_channel = None
             _ = e
+
+        # Apply power-on APU register semantics used by reset test ROMs.
+        self._power_on_init()
 
     cdef double _duty_ratio(self, int duty_idx):
         """Delegate pulse duty conversion to channel helper module.
@@ -420,6 +347,97 @@ cdef class APU:
             in 5-step mode through delegated helper logic.
         """
         apu_advance_frame_reload_delay(self, cpu_cycles)
+
+    cdef void _power_on_init(self):
+        """Apply APU power-up defaults expected by hardware test ROMs.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Clears status/IRQ latches, initializes frame-counter sequencing as if
+            `$4017=$00` had been written shortly before CPU execution, clears
+            all length counters and channel enables.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/APU_Frame_Counter
+            https://www.nesdev.org/wiki/APU_status
+        """
+        self.frame_irq_flag = 0
+        self.frame_irq_retrigger = 0
+        self.dmc_irq_flag = 0
+        self.frame_irq_inhibit = 0
+        self.frame_mode_5step = 0
+        self.frame_reload_mode_5step = 0
+        self.frame_reload_pending = 0
+        self.frame_reload_delay = 0
+        self.frame_last_write = 0x00
+        self.pulse_enabled[0] = 0
+        self.pulse_enabled[1] = 0
+        self.tri_enabled = 0
+        self.noise_enabled = 0
+        self.pulse_length[0] = 0
+        self.pulse_length[1] = 0
+        self.tri_length = 0
+        self.noise_length = 0
+        # Start near post-write state to approximate 9-12 CPU clocks delay.
+        self.frame_cycle_pos = 10
+
+    cdef void _console_reset(self):
+        """Apply console reset behavior for APU-visible state.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Clears status/IRQ flags and all channel length counters (matching 
+            $4015 cleared), and restarts frame timing close to hardware reset 
+            startup point.
+
+        NESdev references:
+            https://www.nesdev.org/wiki/APU_Frame_Counter
+            https://www.nesdev.org/wiki/APU_status
+        """
+        # Clear IRQ flags and all enabled/length state (matching power-on).
+        self.frame_irq_flag = 0
+        self.frame_irq_retrigger = 0
+        self.dmc_irq_flag = 0
+        self.pulse_enabled[0] = 0
+        self.pulse_enabled[1] = 0
+        self.tri_enabled = 0
+        self.noise_enabled = 0
+        self.pulse_length[0] = 0
+        self.pulse_length[1] = 0
+        self.tri_length = 0
+        self.noise_length = 0
+        self.dmc_bytes_remaining = 0
+        self.dmc_sample_buffer_empty = 1
+        self.dmc_bits_remaining = 8
+        self.frame_reload_pending = 0
+        self.frame_reload_delay = 0
+
+        # Reset reapplies the last $4017 write value's mode bits.
+        self.frame_mode_5step = 1 if (self.frame_last_write & 0x80) else 0
+        self.frame_reload_mode_5step = self.frame_mode_5step
+        self.frame_irq_inhibit = 1 if (self.frame_last_write & 0x40) else 0
+        self.frame_cycle_pos = 10
+
+    cpdef public void reset(self):
+        """Public wrapper for console reset behavior.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        self._console_reset()
 
     cpdef public uint8_t read_status(self):
         """Delegate status-register read semantics to IO helper module.

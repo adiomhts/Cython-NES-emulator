@@ -271,11 +271,26 @@ class NES:
                 self.cpu.memory[0x8000:0x10000] = self.cartridge.prg_rom
 
         elif self.cartridge.mapper == 4:
-            # Placeholder MMC3 split window arrangement for startup mapping.
-            self.cpu.memory[0x8000:0xA000] = self.cartridge.prg_rom[:0x2000]
-            self.cpu.memory[0xA000:0xC000] = self.cartridge.prg_rom[-0x4000:-0x2000]
-            self.cpu.memory[0xC000:0xE000] = self.cartridge.prg_rom[-0x2000:]
-            self.cpu.memory[0xE000:0x10000] = self.cartridge.prg_rom[-0x4000:]
+            # Placeholder MMC3 startup mapping by 8KB banks.
+            # Keeps layout valid even for minimal PRG sizes and avoids
+            # broadcasting errors when ROM has fewer than 4 x 8KB banks.
+            if prg_size < 0x2000 or (prg_size % 0x2000) != 0:
+                raise ValueError(f"Invalid PRG size for mapper 4: {prg_size}")
+
+            prg_banks = [
+                self.cartridge.prg_rom[i:i + 0x2000]
+                for i in range(0, prg_size, 0x2000)
+            ]
+
+            bank0 = prg_banks[0]
+            bank1 = prg_banks[1] if len(prg_banks) > 1 else prg_banks[0]
+            bank2 = prg_banks[-2] if len(prg_banks) > 1 else prg_banks[0]
+            bank3 = prg_banks[-1]
+
+            self.cpu.memory[0x8000:0xA000] = bank0
+            self.cpu.memory[0xA000:0xC000] = bank1
+            self.cpu.memory[0xC000:0xE000] = bank2
+            self.cpu.memory[0xE000:0x10000] = bank3
 
         else:
             raise ValueError(f"Unsupported mapper: {self.cartridge.mapper}")

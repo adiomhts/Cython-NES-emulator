@@ -30,28 +30,6 @@ cdef class CPU6502:
     - https://www.nesdev.org/wiki/Cycle_reference_chart
     """
 
-    cdef uint8_t A
-    cdef uint8_t X
-    cdef uint8_t Y
-    cdef uint8_t SP
-    cdef uint16_t PC
-    cdef CPUFlags F
-    cdef public cnp.ndarray memory
-    cdef cnp.ndarray ram
-    cdef public int cycles
-    cdef uint8_t current_instruction
-    cdef uint16_t current_memory_address
-    cdef bint has_current_address
-    cdef uint16_t interrupt_vectors[3]
-    cdef bint interrupts[2]
-    cdef object ppu
-    cdef object apu
-    cdef object controller
-    cdef object controller2
-    cdef object cartridge
-    cdef int _debug_instr_printed
-    cdef int _debug_instr_limit
-
     def __init__(self):
         """Create CPU state, opcode tables, and interrupt vectors.
 
@@ -100,6 +78,7 @@ cdef class CPU6502:
         self.controller2 = None
         self._debug_instr_printed = 0
         self._debug_instr_limit = 50
+        self._has_reset_once = 0
 
     cpdef public void reset(self):
         """Reset CPU core state.
@@ -124,6 +103,14 @@ cdef class CPU6502:
         self.SP = <uint8_t>0xFD
         self.F.interrupts_disabled = True
         self.cycles = 0
+        # First reset after power-on initializes CPU only; later resets emulate
+        # reset-button behavior and must also reset APU frame/status state.
+        if self._has_reset_once and self.apu is not None:
+            try:
+                self.apu.reset()
+            except Exception:
+                pass
+        self._has_reset_once = 1
 
     cdef uint8_t fetch(self):
         cdef uint8_t opcode = self.read_byte(self.PC)

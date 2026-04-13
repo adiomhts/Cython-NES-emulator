@@ -7,6 +7,11 @@
 # NESdev references:
 # - https://www.nesdev.org/wiki/MMC3
 
+# IDE Static Analysis Hints
+if not "MapperBase" in globals():
+    from mappers cimport MapperBase
+    from libc.stdint cimport uint8_t, uint16_t, uint32_t
+
 cdef class Mapper4(MapperBase):
     """Mapper 4 (MMC3-like) with PRG/CHR banking and IRQ logic.
 
@@ -14,9 +19,6 @@ cdef class Mapper4(MapperBase):
     - https://www.nesdev.org/wiki/Mapper_004
     - https://www.nesdev.org/wiki/MMC3
     """
-
-    cdef public uint8_t bank_select, prg_mode, chr_mode, mirroring, irq_latch, irq_counter, irq_reload, irq_enable, irq_pending, last_a12
-    cdef public uint8_t bank_regs[8]
 
     def __init__(self, prg_rom, chr_rom):
         """Initialize banked PRG/CHR state for mapper 4 emulation paths.

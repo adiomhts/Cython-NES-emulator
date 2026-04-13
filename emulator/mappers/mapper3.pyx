@@ -5,6 +5,11 @@
 # NESdev references:
 # - https://www.nesdev.org/wiki/CNROM
 
+# IDE Static Analysis Hints
+if not "MapperBase" in globals():
+    from mappers cimport MapperBase
+    from libc.stdint cimport uint8_t, uint16_t, uint32_t
+
 cdef class Mapper3(MapperBase):
     """Mapper 3 (CNROM-like): fixed PRG with switchable CHR bank.
 
@@ -12,8 +17,6 @@ cdef class Mapper3(MapperBase):
     - https://www.nesdev.org/wiki/Mapper_003
     - https://www.nesdev.org/wiki/CNROM
     """
-
-    cdef public uint8_t chr_bank
 
     def __init__(self, prg_rom, chr_rom):
         """Initialize PRG/CHR buffers and CHR bank state.
@@ -92,3 +95,18 @@ cdef class Mapper3(MapperBase):
 
         # CNROM bank select usually lives in low bits.
         self.chr_bank = <uint8_t>((value & 0x1F) % chr_banks_8k)
+
+    cpdef public void write_chr(self, uint16_t address, uint8_t value):
+        """Handle CHR writes when carriage uses CHR RAM.
+
+        Args:
+            address: PPU CHR address.
+            value: Byte to store.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Stores byte in CHR RAM backing array.
+        """
+        self.chr_rom_view[address % len(self.chr_rom_view)] = value

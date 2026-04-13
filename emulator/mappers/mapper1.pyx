@@ -7,6 +7,14 @@
 # NESdev references:
 # - https://www.nesdev.org/wiki/MMC1
 
+# IDE Static Analysis Hints
+if not "MapperBase" in globals():
+    from mappers cimport MapperBase
+    from libc.stdint cimport uint8_t, uint16_t
+    import numpy as np
+
+    
+
 cdef class Mapper1(MapperBase):
     """Mapper 1 (MMC1-like) with serial register writes and PRG-RAM support.
 
@@ -14,10 +22,6 @@ cdef class Mapper1(MapperBase):
     - https://www.nesdev.org/wiki/Mapper_001
     - https://www.nesdev.org/wiki/MMC1
     """
-
-    cdef public uint8_t[:] prg_ram
-    cdef public uint8_t[:] prg_ram_view
-    cdef public uint8_t shift_reg, shift_count, control, chr_bank0, chr_bank1, prg_bank_reg
 
     def __init__(self, prg_rom, chr_rom):
         """Initialize mapper state and selected banks.

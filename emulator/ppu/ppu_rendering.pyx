@@ -2,6 +2,11 @@
 # - https://www.nesdev.org/wiki/PPU_rendering
 # - https://www.nesdev.org/wiki/PPU_sprite_evaluation
 
+# IDE Static Analysis Hints
+if not "PPU" in globals():
+    from ppu cimport PPU
+    from libc.stdint cimport uint8_t, uint16_t, uint32_t
+
 cpdef void ppu_render_scanline(PPU self, int line):
     """Renders all background pixels for a single visible scanline.
 

@@ -6,6 +6,11 @@
 # NESdev references:
 # - https://www.nesdev.org/wiki/UxROM
 
+# IDE Static Analysis Hints
+if not "MapperBase" in globals():
+    from mappers cimport MapperBase
+    from libc.stdint cimport uint8_t, uint16_t, uint32_t
+
 cdef class Mapper2(MapperBase):
     """Mapper 2 (UxROM-like): switchable lower PRG bank with fixed CHR view.
 
@@ -13,8 +18,6 @@ cdef class Mapper2(MapperBase):
     - https://www.nesdev.org/wiki/Mapper_002
     - https://www.nesdev.org/wiki/UxROM
     """
-
-    cdef public uint8_t prg_bank
 
     def __init__(self, prg_rom, chr_rom):
         """Initialize PRG/CHR storage and active PRG bank index.
@@ -99,3 +102,18 @@ cdef class Mapper2(MapperBase):
 
         # UxROM generally uses lower nibble for bank id.
         self.prg_bank = <uint8_t>((value & 0x0F) % prg_banks_16k)
+
+    cpdef public void write_chr(self, uint16_t address, uint8_t value):
+        """Handle CHR writes when cartridge uses CHR RAM.
+
+        Args:
+            address: PPU CHR address.
+            value: Byte to store.
+
+        Returns:
+            None.
+
+        Side Effects:
+            Stores byte in CHR RAM backing array.
+        """
+        self.chr_rom_view[address % len(self.chr_rom_view)] = value

@@ -6,6 +6,10 @@
 # NESdev references:
 # - https://www.nesdev.org/wiki/PPU_scrolling
 
+# IDE Static Analysis Hints
+if not "PPU" in globals():
+    from ppu cimport PPU
+
 cdef void ppu_increment_v(PPU self):
     # PPUDATA increment mode: +1 across columns or +32 across rows.
     self.v += 32 if (self.ctrl & 0x04) else 1

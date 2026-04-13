@@ -2,7 +2,10 @@
 # - https://www.nesdev.org/wiki/CPU
 # - https://www.nesdev.org/wiki/Status_flags
 
-# CPU6502 type is provided by the including module ('core.pxi').
+# IDE Static Analysis Hints
+if not "CPU6502" in globals():
+    from cpu cimport CPU6502
+    from libc.stdint cimport uint8_t, uint16_t, int8_t
 
 cdef void op_JSR(CPU6502 cpu):
     """JSR - Jump to Subroutine.

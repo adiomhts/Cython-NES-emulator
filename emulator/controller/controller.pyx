@@ -21,10 +21,6 @@ cdef class Controller:
     - https://www.nesdev.org/wiki/Standard_controller
     """
 
-    cdef uint8_t buttons
-    cdef uint8_t shift_reg
-    cdef bint strobe
-
     def __init__(self):
         """Initialize controller internal state.
 
@@ -47,7 +43,7 @@ cdef class Controller:
         # Strobe high means always return current A button bit.
         self.strobe = False
 
-    def update(self, list buttons_state):
+    cpdef public void update(self, list buttons_state):
         """Update live button state from host input.
 
         Args:

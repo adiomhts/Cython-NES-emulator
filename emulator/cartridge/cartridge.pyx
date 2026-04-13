@@ -27,14 +27,6 @@ cdef class Cartridge:
     - https://www.nesdev.org/wiki/Mapper
     """
 
-    cdef public object prg_rom
-    cdef public object chr_rom
-    cdef unsigned char[:] prg_rom_view
-    cdef unsigned char[:] chr_rom_view
-    
-    cdef public uint8_t mapper, prg_banks, chr_banks, mirroring, battery_backed
-    cdef public object mapper_instance
-
     def __init__(self, file_path: str):
         """Load and parse a '.nes' ROM file.
 

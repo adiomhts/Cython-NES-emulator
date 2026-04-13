@@ -14,7 +14,12 @@
 # - https://www.nesdev.org/wiki/CPU_unofficial_opcodes
 # - https://www.nesdev.org/wiki/Cycle_reference_chart
 
-# AddressingMode enum is already included from 'cpu_adressing_modes.pyx'.
+# IDE Static Analysis Hints
+if not "CPU6502" in globals():
+    from cpu cimport *
+    
+    # AddressingModes (defined in cpu_addressing_modes.pyx)
+    from cpu cimport AddressingMode, NONE, DIRECT, IMMEDIATE, ZEROPAGE, ABSOLUTE, ZEROPAGEX, ZEROPAGEY, ABSOLUTEX, ABSOLUTEY, INDIRECTX, INDIRECTY
 
 
 cdef struct OpcodeDef:

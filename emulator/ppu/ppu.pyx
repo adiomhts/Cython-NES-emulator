@@ -34,38 +34,6 @@ cdef class PPU:
     - https://www.nesdev.org/wiki/PPU_rendering
     """
 
-    cdef int scanline, cycle
-    cdef public object frame_buffer
-    cdef public uint8_t[:] oam_data
-    cdef public uint8_t[:] vram
-    cdef public uint8_t[:] palette_ram
-    cdef uint8_t mirroring, vblank_flag
-    
-    cdef public uint8_t ctrl, mask, status, oam_addr, fine_x
-    
-    cdef uint16_t v, t
-    cdef uint8_t write_toggle
-    
-    cdef uint8_t scroll_x, scroll_y
-
-    cdef uint8_t snap_fine_x
-
-    cdef uint8_t read_buffer
-    
-    cdef uint8_t[:] scanline_oam
-    cdef int sprite_count
-    cdef uint8_t sprite0_hit
-    cdef int sprite0_hit_x
-    cdef uint8_t[:] scanline_bg
-    cdef int sprite0_in_scanline
-    cdef bint odd_frame
-    
-    cdef int[:, :] nes_palette
-    
-    cdef public object chr_rom
-    cdef public object cpu
-    cdef public object cartridge
-
     def __init__(self, mirroring=0):
         """Initialize PPU state and memory arrays.
 

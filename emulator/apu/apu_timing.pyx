@@ -11,6 +11,12 @@
 # - https://www.nesdev.org/wiki/APU_Frame_Counter
 # - https://www.nesdev.org/wiki/APU_DMC
 
+# IDE Static Analysis Hints
+# IDE Static Analysis Hints
+if not "APU" in globals():
+    from apu cimport APU, DMC_RATE_TABLE
+    from libc.stdint cimport uint8_t, uint16_t, uint32_t
+
 cdef void apu_dmc_fetch_byte(APU self):
     """Fetch one DMC byte from CPU memory into DMC sample buffer.
 
@@ -239,30 +245,39 @@ cdef void apu_clock_frame_counter(APU self, uint32_t cpu_cycles):
         wraps sequence position, and may assert frame IRQ in 4-step mode.
 
     Notes:
-        Event timing uses integer cycle checkpoints matching conventional
-        NESdev guidance for practical emulator implementations.
+        Event timing uses CPU-cycle checkpoints (not APU half-cycles), so
+        quarter/half-frame clocks occur near 7457/14913/22371/29829 in 4-step
+        mode and near 7457/14913/22371/37281 in 5-step mode.
 
     NESdev references:
         https://www.nesdev.org/wiki/APU_Frame_Counter
     """
-    cdef int seq_len, e1, e2, e3, e4
+    cdef int seq_len, e1, e2, e3, e4, h2, h4
     cdef int old_pos, new_pos, step, remaining
 
     if self.frame_mode_5step:
-        seq_len = 18641
-        e1 = 3729
-        e2 = 7457
-        e3 = 11186
-        e4 = 18641
+        seq_len = 37282
+        e1 = 7457
+        e2 = 14913
+        e3 = 22371
+        e4 = 37281
+        h2 = 14914
+        h4 = 37282
     else:
-        seq_len = 14915
-        e1 = 3729
-        e2 = 7457
-        e3 = 11186
-        e4 = 14915
+        seq_len = 29830
+        e1 = 7457
+        e2 = 14913
+        e3 = 22371
+        e4 = 29829
+        h2 = 14914
+        h4 = 29830
 
     remaining = <int>cpu_cycles
     while remaining > 0:
+        if self.frame_mode_5step == 0 and self.frame_irq_inhibit == 0 and self.frame_irq_retrigger > 0:
+            self.frame_irq_flag = 1
+            self.frame_irq_retrigger -= 1
+
         old_pos = self.frame_cycle_pos
         step = seq_len - old_pos
         if step > remaining:
@@ -278,13 +293,14 @@ cdef void apu_clock_frame_counter(APU self, uint32_t cpu_cycles):
         if old_pos < e4 <= new_pos:
             apu_clock_quarter_frame(self)
 
-        if old_pos < e2 <= new_pos:
+        if old_pos < h2 <= new_pos:
             apu_clock_half_frame(self)
-        if old_pos < e4 <= new_pos:
+        if old_pos < h4 <= new_pos:
             apu_clock_half_frame(self)
 
         if self.frame_mode_5step == 0 and old_pos < e4 <= new_pos and self.frame_irq_inhibit == 0:
             self.frame_irq_flag = 1
+            self.frame_irq_retrigger = 2
             if self.cpu is not None:
                 try:
                     self.cpu.trigger_interrupt(1)

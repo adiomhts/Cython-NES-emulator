@@ -22,13 +22,13 @@ cdef class CPUFlags:
     - https://www.nesdev.org/wiki/CPU
     """
 
-    cdef bint negative
-    cdef bint overflow     
-    cdef bint break_source 
-    cdef bint decimal_mode 
-    cdef bint interrupts_disabled 
-    cdef bint zero 
-    cdef bint carry     
+    cdef public bint negative
+    cdef public bint overflow     
+    cdef public bint break_source 
+    cdef public bint decimal_mode 
+    cdef public bint interrupts_disabled 
+    cdef public bint zero 
+    cdef public bint carry     
 
     def __init__(self):
         """Initialize all status flags to cleared state.

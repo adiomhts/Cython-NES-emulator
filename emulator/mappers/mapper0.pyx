@@ -6,6 +6,11 @@
 # NESdev references:
 # - https://www.nesdev.org/wiki/NROM
 
+# IDE Static Analysis Hints
+if not "MapperBase" in globals():
+    from mappers cimport MapperBase
+    from libc.stdint cimport uint8_t, uint16_t, uint32_t
+
 cdef class Mapper0(MapperBase):
     """Mapper 0 (NROM): fixed PRG/CHR mapping without bank switching.
 

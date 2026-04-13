@@ -14,6 +14,12 @@
 # - https://www.nesdev.org/wiki/APU_Noise
 # - https://www.nesdev.org/wiki/APU_DMC
 
+# IDE Static Analysis Hints
+if not "APU" in globals():
+    from apu cimport APU, NOISE_PERIOD_TABLE
+    from libc.stdint cimport uint8_t, uint16_t, uint32_t
+
+
 cdef double apu_duty_ratio(APU self, int duty_idx):
     """Convert pulse duty index into normalized high-level ratio.
 

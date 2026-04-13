@@ -25,10 +25,6 @@ cimport numpy as cnp
 
 cdef class MapperBase:
     """Base class defining common mapper structure and memory buffers."""
-    cdef public object prg_rom
-    cdef public object chr_rom
-    cdef public uint8_t[:] prg_rom_view
-    cdef public uint8_t[:] chr_rom_view
 
 include "mapper0.pyx"
 include "mapper1.pyx"

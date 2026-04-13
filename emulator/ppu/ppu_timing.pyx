@@ -7,6 +7,10 @@
 # - https://www.nesdev.org/wiki/PPU_frame_timing
 # - https://www.nesdev.org/wiki/NMI
 
+# IDE Static Analysis Hints
+if not "PPU" in globals():
+    from ppu cimport PPU
+
 cdef void ppu_step_core(PPU self):
     cdef bint rendering_enabled
     cdef int i, pal_idx_line

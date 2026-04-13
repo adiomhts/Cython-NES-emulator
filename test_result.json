@@ -1,0 +1,104 @@
+{
+  "root": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms",
+  "max_frames": 1500,
+  "suite_count": 1,
+  "summary": {
+    "PASS": 6,
+    "FAIL": 1,
+    "TIMEOUT": 2,
+    "ERROR": 0,
+    "TOTAL": 9
+  },
+  "results": [
+    {
+      "suite": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test",
+      "rom": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test\\apu_test.nes",
+      "pass_code": 0,
+      "status": "TIMEOUT",
+      "result_code": null,
+      "reset_requested": false,
+      "frames": 1500,
+      "message": ""
+    },
+    {
+      "suite": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test",
+      "rom": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test\\rom_singles\\1-len_ctr.nes",
+      "pass_code": 0,
+      "status": "PASS",
+      "result_code": 0,
+      "reset_requested": false,
+      "frames": 21,
+      "message": "1-len_ctr\n\nPassed"
+    },
+    {
+      "suite": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test",
+      "rom": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test\\rom_singles\\2-len_table.nes",
+      "pass_code": 0,
+      "status": "PASS",
+      "result_code": 0,
+      "reset_requested": false,
+      "frames": 16,
+      "message": "2-len_table\n\nPassed"
+    },
+    {
+      "suite": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test",
+      "rom": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test\\rom_singles\\3-irq_flag.nes",
+      "pass_code": 0,
+      "status": "PASS",
+      "result_code": 0,
+      "reset_requested": false,
+      "frames": 21,
+      "message": "3-irq_flag\n\nPassed"
+    },
+    {
+      "suite": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test",
+      "rom": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test\\rom_singles\\4-jitter.nes",
+      "pass_code": 0,
+      "status": "PASS",
+      "result_code": 0,
+      "reset_requested": false,
+      "frames": 20,
+      "message": "4-jitter\n\nPassed"
+    },
+    {
+      "suite": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test",
+      "rom": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test\\rom_singles\\5-len_timing.nes",
+      "pass_code": 0,
+      "status": "PASS",
+      "result_code": 0,
+      "reset_requested": false,
+      "frames": 114,
+      "message": "5-len_timing\n\nPassed"
+    },
+    {
+      "suite": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test",
+      "rom": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test\\rom_singles\\6-irq_flag_timing.nes",
+      "pass_code": 0,
+      "status": "PASS",
+      "result_code": 0,
+      "reset_requested": false,
+      "frames": 22,
+      "message": "6-irq_flag_timing\n\nPassed"
+    },
+    {
+      "suite": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test",
+      "rom": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test\\rom_singles\\7-dmc_basics.nes",
+      "pass_code": 0,
+      "status": "FAIL",
+      "result_code": 2,
+      "reset_requested": false,
+      "frames": 18,
+      "message": "Channel: 0\n\nDMC isn't working well enough to test further\n\n7-dmc_basics\n\nFailed #2"
+    },
+    {
+      "suite": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test",
+      "rom": "C:\\Users\\Mechta\\Documents\\Cython-NES-emulator\\tests\\nes-test-roms\\apu_test\\rom_singles\\8-dmc_rates.nes",
+      "pass_code": 0,
+      "status": "TIMEOUT",
+      "result_code": null,
+      "reset_requested": false,
+      "frames": 1500,
+      "message": ""
+    }
+  ]
+}

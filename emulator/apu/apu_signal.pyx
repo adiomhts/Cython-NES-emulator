@@ -8,6 +8,10 @@
 # - https://www.nesdev.org/wiki/APU_Mixer
 # - https://www.nesdev.org/wiki/APU
 
+# IDE Static Analysis Hints
+if not "APU" in globals():
+    from apu cimport APU
+
 cdef double apu_mix_channels(APU self):
     """Compute mixed APU sample from all channel generators.
 

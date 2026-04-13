@@ -9,7 +9,7 @@
 # NESdev references:
 # - https://www.nesdev.org/wiki/CPU_addressing_modes
 # - https://www.nesdev.org/wiki/CPU
-
+  
 cdef enum AddressingMode:
     NONE = 0
     DIRECT = 1

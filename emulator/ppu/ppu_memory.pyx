@@ -7,6 +7,11 @@
 # - https://www.nesdev.org/wiki/Mirroring
 # - https://www.nesdev.org/wiki/PPU_memory_map
 
+# IDE Static Analysis Hints
+if not "PPU" in globals():
+    from ppu cimport PPU
+    from libc.stdint cimport uint8_t, uint16_t, uint32_t
+
 cdef int ppu_get_vram_mirror(PPU self, int addr):
     cdef int pal_addr, clean_addr, table, offset, bank
 
