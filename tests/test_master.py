@@ -131,7 +131,7 @@ def run_single_rom(
 
     try:
         for frame_idx in range(1, max_frames + 1):
-            nes.run_frame(present=False)
+            nes.run_frame()
 
             status = _mem_u8(nes, 0x6000)
             sig_ok = (

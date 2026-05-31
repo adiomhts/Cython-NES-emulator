@@ -7,6 +7,8 @@ cdef class MapperBase:
     cdef public object chr_rom
     cdef public uint8_t[:] prg_rom_view
     cdef public uint8_t[:] chr_rom_view
+    cdef public uint8_t mirroring
+    cpdef public void clock_irq(self)
 
 cdef class Mapper0(MapperBase):
     cpdef public uint8_t read_prg(self, uint16_t address)
@@ -40,7 +42,7 @@ cdef class Mapper3(MapperBase):
 cdef class Mapper4(MapperBase):
     cdef public uint8_t[:] prg_ram
     cdef public uint8_t[:] prg_ram_view
-    cdef public uint8_t bank_select, prg_mode, chr_mode, mirroring, irq_latch, irq_counter, irq_reload, irq_enable, irq_pending, last_a12
+    cdef public uint8_t bank_select, prg_mode, chr_mode, irq_latch, irq_counter, irq_reload, irq_enable, irq_pending, last_a12
     cdef public uint8_t bank_regs[8]
     cpdef public uint8_t read_prg(self, uint16_t address)
     cpdef public uint8_t read_chr(self, uint16_t address)

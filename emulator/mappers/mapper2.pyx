@@ -15,7 +15,6 @@ cdef class Mapper2(MapperBase):
     """Mapper 2 (UxROM-like): switchable lower PRG bank with fixed CHR view.
 
     NESdev references:
-    - https://www.nesdev.org/wiki/Mapper_002
     - https://www.nesdev.org/wiki/UxROM
     """
 
@@ -100,7 +99,7 @@ cdef class Mapper2(MapperBase):
             self.prg_bank = 0
             return
 
-        # UxROM generally uses lower nibble for bank id.
+        # UxROM uses the full byte for bank id (though standard boards only use a few bits). This implementation masks the lower nibble.
         self.prg_bank = <uint8_t>((value & 0x0F) % prg_banks_16k)
 
     cpdef public void write_chr(self, uint16_t address, uint8_t value):

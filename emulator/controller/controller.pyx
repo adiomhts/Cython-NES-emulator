@@ -59,7 +59,7 @@ cdef class Controller:
 
         NESdev references:
             https://www.nesdev.org/wiki/Controller_reading
-            https://www.nesdev.org/wiki/Standard_controller#Input
+            https://www.nesdev.org/wiki/Standard_controller#Input_($4016_write)
         """
         # Rebuild packed bitfield from current host button snapshot.
         self.buttons = 0
@@ -100,7 +100,7 @@ cdef class Controller:
 
         NESdev references:
             https://www.nesdev.org/wiki/Controller_reading
-            https://www.nesdev.org/wiki/Standard_controller#Input_$4016_Write
+            https://www.nesdev.org/wiki/Standard_controller#Input_($4016_Write)
         """
         # Bit 0 controls strobe (1=latch repeatedly, 0=shift on reads).
         cdef bint new_strobe = (value & 1) != 0
@@ -127,7 +127,7 @@ cdef class Controller:
 
         NESdev references:
             https://www.nesdev.org/wiki/Controller_reading
-            https://www.nesdev.org/wiki/Standard_controller#Input_$4016.2F$4017_Read
+            https://www.nesdev.org/wiki/Standard_controller#Output_($4016/$4017_read)
         """
         cdef uint8_t ret
         

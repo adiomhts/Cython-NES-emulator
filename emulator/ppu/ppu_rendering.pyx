@@ -183,7 +183,7 @@ cdef int ppu_find_sprite0_hit_x(PPU self, int line):
              on this scanline.
 
     NESdev reference:
-        https://www.nesdev.org/wiki/PPU_sprite_evaluation#Sprite_zero_hits
+        https://www.nesdev.org/wiki/PPU_sprite_evaluation
     """
     cdef int y, x, height, tile_index, attr
     cdef bint flip_x, flip_y

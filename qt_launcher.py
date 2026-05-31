@@ -5,6 +5,15 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+import site
+
+# Fix for Qt plugins in virtual environments (like uv)
+try:
+    site_packages = site.getsitepackages()[0]
+    qt_plugin_path = os.path.join(site_packages, "PyQt5", "Qt5", "plugins")
+    os.environ["QT_PLUGIN_PATH"] = qt_plugin_path
+except Exception:
+    pass
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (

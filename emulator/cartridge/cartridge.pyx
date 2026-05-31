@@ -72,7 +72,12 @@ cdef class Cartridge:
         chr_size = self.chr_banks * 8192
 
         # ROM payload starts immediately after 16-byte iNES header.
-        start = 16
+        cdef int start = 16
+        # Only skip trainer if the file is actually large enough to contain it.
+        # Many old bad dumps have the trainer flag set incorrectly (e.g. DiskDude!).
+        if (data[6] & 0x04) and len(data) >= 16 + 512 + prg_size + chr_size:
+            start += 512
+            
         prg_slice = data[start:start + prg_size]
         start += prg_size
         chr_slice = data[start:start + chr_size]
@@ -116,7 +121,7 @@ cdef class Cartridge:
 
         NESdev references:
             https://www.nesdev.org/wiki/Mapper
-            https://www.nesdev.org/wiki/Mapper_000
+            https://www.nesdev.org/wiki/NROM
         """
         # Dispatch mapper id to concrete implementation class.
         if self.mapper == 0:

@@ -188,13 +188,13 @@ cdef class CPU6502:
 
     cdef void push(self, uint8_t value):
         # Stack is fixed at page $0100 and grows downward.
-        self.write_byte(0x0100 + self.SP, value)
+        self.ram[0x0100 + self.SP] = value
         self.SP -= 1
 
     cdef uint8_t pop(self):
         # Pop reverses push order and stack grows upward on read.
         self.SP += 1
-        return self.read_byte(0x0100 + self.SP)
+        return self.ram[0x0100 + self.SP]
 
     cdef void push_word(self, uint16_t value):
         # Push high then low, matching 6502 interrupt/call conventions.
@@ -202,7 +202,9 @@ cdef class CPU6502:
         self.push(<uint8_t>(value & 0xFF))
 
     cdef uint16_t pop_word(self):
-        return <uint16_t>(self.pop() | (self.pop() << 8))
+        cdef uint16_t lo = self.pop()
+        cdef uint16_t hi = self.pop()
+        return lo | (hi << 8)
 
     cdef uint8_t get_P(self):
         return <uint8_t>(

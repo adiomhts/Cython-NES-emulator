@@ -32,7 +32,7 @@ cpdef uint8_t apu_read_status(APU self):
         Clears frame IRQ flag after read (DMC IRQ flag is not cleared here).
 
     NESdev references:
-        https://www.nesdev.org/wiki/APU_status
+        https://www.nesdev.org/wiki/APU
         https://www.nesdev.org/wiki/APU_registers
     """
     cdef uint8_t status

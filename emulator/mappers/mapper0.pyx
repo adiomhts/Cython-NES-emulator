@@ -15,7 +15,6 @@ cdef class Mapper0(MapperBase):
     """Mapper 0 (NROM): fixed PRG/CHR mapping without bank switching.
 
     NESdev references:
-    - https://www.nesdev.org/wiki/Mapper_000
     - https://www.nesdev.org/wiki/NROM
     """
 
@@ -33,7 +32,7 @@ cdef class Mapper0(MapperBase):
             Stores references and creates typed views for fast indexed access.
 
         NESdev reference:
-            https://www.nesdev.org/wiki/Mapper_000
+            https://www.nesdev.org/wiki/NROM
         """
         # NROM has no bank registers; map data directly.
         self.prg_rom = prg_rom
@@ -52,7 +51,7 @@ cdef class Mapper0(MapperBase):
 
         NESdev references:
             https://www.nesdev.org/wiki/CPU_memory_map
-            https://www.nesdev.org/wiki/Mapper_000
+            https://www.nesdev.org/wiki/NROM
         """
         # NROM mirrors by modulo when only one 16KB bank exists.
         if address >= 0x8000:
@@ -70,7 +69,7 @@ cdef class Mapper0(MapperBase):
 
         NESdev references:
             https://www.nesdev.org/wiki/PPU_pattern_tables
-            https://www.nesdev.org/wiki/Mapper_000
+            https://www.nesdev.org/wiki/NROM
         """
         return self.chr_rom_view[address % len(self.chr_rom_view)]
 

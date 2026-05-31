@@ -19,7 +19,6 @@ cdef class Mapper1(MapperBase):
     """Mapper 1 (MMC1-like) with serial register writes and PRG-RAM support.
 
     NESdev references:
-    - https://www.nesdev.org/wiki/Mapper_001
     - https://www.nesdev.org/wiki/MMC1
     """
 

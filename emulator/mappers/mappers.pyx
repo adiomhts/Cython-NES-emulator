@@ -26,6 +26,9 @@ cimport numpy as cnp
 cdef class MapperBase:
     """Base class defining common mapper structure and memory buffers."""
 
+    cpdef public void clock_irq(self):
+        pass
+
 include "mapper0.pyx"
 include "mapper1.pyx"
 include "mapper2.pyx"

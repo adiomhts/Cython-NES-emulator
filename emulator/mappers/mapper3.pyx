@@ -14,7 +14,6 @@ cdef class Mapper3(MapperBase):
     """Mapper 3 (CNROM-like): fixed PRG with switchable CHR bank.
 
     NESdev references:
-    - https://www.nesdev.org/wiki/Mapper_003
     - https://www.nesdev.org/wiki/CNROM
     """
 

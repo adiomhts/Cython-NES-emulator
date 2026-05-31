@@ -13,7 +13,7 @@ if not "PPU" in globals():
     from libc.stdint cimport uint8_t, uint16_t, uint32_t
 
 cdef int ppu_get_vram_mirror(PPU self, int addr):
-    cdef int pal_addr, clean_addr, table, offset, bank
+    cdef int pal_addr, clean_addr, table, offset, bank, mirror_mode
 
     # PPU internal address bus wraps at 14 bits.
     addr = addr & 0x3FFF
@@ -33,13 +33,22 @@ cdef int ppu_get_vram_mirror(PPU self, int addr):
         offset = clean_addr % 0x400
         bank = 0
 
-        if self.mirroring == 0:
+        mirror_mode = self.mirroring
+        if self.cartridge is not None:
+            try:
+                # Only mappers that dynamically change mirroring should override it.
+                if getattr(self.cartridge, 'mapper', 0) in (1, 4):
+                    mirror_mode = self.cartridge.mapper_instance.mirroring
+            except Exception:
+                pass
+
+        if mirror_mode == 0:
             # Horizontal mirroring: NT0/NT1 share, NT2/NT3 share.
             if table == 0 or table == 1:
                 bank = 0
             else:
                 bank = 1
-        elif self.mirroring == 1:
+        elif mirror_mode == 1:
             # Vertical mirroring: NT0/NT2 share, NT1/NT3 share.
             if table == 0 or table == 2:
                 bank = 0
@@ -59,7 +68,8 @@ cdef inline uint8_t ppu_read_chr(PPU self, uint16_t addr):
     if self.cartridge is not None:
         try:
             return self.cartridge.mapper_instance.read_chr(addr)
-        except Exception:
+        except Exception as e:
+            print("read_chr exception:", e)
             pass
     if self.chr_rom is not None and addr < len(self.chr_rom):
         return self.chr_rom[addr]

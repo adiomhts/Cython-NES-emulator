@@ -89,6 +89,17 @@ cdef class Mapper4(MapperBase):
         # Store previous A12 level to detect next edge.
         self.last_a12 = a12
 
+    cpdef public void clock_irq(self):
+        # Scanline-based IRQ clocking
+        if self.irq_counter == 0 or self.irq_reload:
+            self.irq_counter = self.irq_latch
+            self.irq_reload = 0
+        else:
+            self.irq_counter -= 1
+
+        if self.irq_counter == 0 and self.irq_enable:
+            self.irq_pending = 1
+
     cpdef public uint8_t read_prg(self, uint16_t address):
         """Read PRG from selected mapper 4 PRG bank.
 
@@ -148,8 +159,8 @@ cdef class Mapper4(MapperBase):
         cdef int idx, bank, offset
         cdef int r0, r1
 
-        # MMC3 IRQ logic is tied to A12 transitions during CHR fetches.
         self._clock_irq_a12(address)
+        
         chr_banks_1k = len(self.chr_rom_view) // 0x400
         if chr_banks_1k <= 0:
             return 0
@@ -169,7 +180,7 @@ cdef class Mapper4(MapperBase):
             elif idx == 3:
                 bank = r1 + 1
             else:
-                bank = self.bank_regs[idx + 2]
+                bank = self.bank_regs[idx - 2]
         else:
             # Inverted CHR mode swaps high/low slot arrangement.
             if idx <= 3:
@@ -213,7 +224,7 @@ cdef class Mapper4(MapperBase):
         elif 0xA000 <= address < 0xC000:
             if (address & 1) == 0:
                 # Mirroring control for supported board variants.
-                self.mirroring = value & 1
+                self.mirroring = 1 if (value & 1) == 0 else 0
         elif 0xC000 <= address < 0xE000:
             if (address & 1) == 0:
                 # IRQ latch update.

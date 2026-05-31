@@ -30,7 +30,7 @@ cdef void op_JSR(CPU6502 cpu):
         return location.
 
     Reference:
-        https://www.nesdev.org/wiki/JSR
+        https://www.nesdev.org/wiki/Instruction_reference#JSR
     """
     # Push the address of the last byte of this instruction onto the stack.
     # The 'RTS' instruction will later pop this and add one to resume execution.
@@ -747,7 +747,7 @@ cdef void op_ADC(CPU6502 cpu):
         - The Overflow flag is set if the addition resulted in a signed overflow.
 
     Reference:
-        https://www.nesdev.org/wiki/ADC
+        https://www.nesdev.org/wiki/6502_instructions
     """
     # Read the value to add from the memory location determined by the addressing mode.
     cdef uint8_t val = cpu.address_read()

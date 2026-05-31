@@ -1,4 +1,3 @@
-import pygame
 import os
 from cpu import CPU6502
 from ppu import PPU
@@ -29,7 +28,7 @@ class NES:
     between them on a frame boundary.
 
     NESdev references:
-    - https://www.nesdev.org/wiki/Nesdev_Wiki
+    - https://www.nesdev.org/wiki
     - https://www.nesdev.org/wiki/CPU
     - https://www.nesdev.org/wiki/PPU
     - https://www.nesdev.org/wiki/APU
@@ -45,9 +44,8 @@ class NES:
             None.
 
         Side Effects:
-            Initializes pygame, creates an output window, loads cartridge data,
-            wires CPU/PPU/APU/controller references, maps CHR data into PPU
-            context, and resets CPU state through 'load_rom'.
+            Loads cartridge data, wires CPU/PPU/APU/controller references,
+            maps CHR data into PPU context, and resets CPU state through 'load_rom'.
 
         Raises:
             ValueError: If cartridge parser rejects the ROM format.
@@ -58,13 +56,6 @@ class NES:
             https://www.nesdev.org/wiki/Mirroring
             https://www.nesdev.org/wiki/PPU_registers
         """
-        # Initialize host multimedia backend and create 256x240 output surface.
-        pygame.init()
-        self.screen = pygame.display.set_mode((256, 240))
-        pygame.display.set_caption("NES Emulator")
-        self.base_width = 256
-        self.base_height = 240
-        
         # Parse ROM, iNES header, mapper info, and PRG/CHR payloads.
         self.cartridge = Cartridge(rom_path) 
         self.rom_path = rom_path
@@ -76,29 +67,17 @@ class NES:
         self.cpu = CPU6502()
         self.ppu = PPU(mirroring=mirroring_mode)
         # Bind CPU into PPU context so PPU can raise NMI/IRQ-style events.
-        try:
-            self.ppu.cpu = self.cpu
-        except Exception:
-            pass
+        self.ppu.cpu = self.cpu
         # Give PPU direct cartridge view for CHR reads where needed.
-        try:
-            self.ppu.cartridge = self.cartridge
-        except Exception:
-            pass
+        self.ppu.cartridge = self.cartridge
         # Create audio unit and connect it to CPU timing domain.
         self.apu = APU()
-        try:
-            self.apu.cpu = self.cpu
-        except Exception:
-            pass
+        self.apu.cpu = self.cpu
         # Two standard gamepads.
         self.controller = Controller()
         self.controller2 = Controller()
         # Expose CHR ROM/RAM to PPU pattern-table fetch path.
-        try:
-            self.ppu.chr_rom = self.cartridge.chr_rom
-        except Exception:
-            self.ppu.chr_rom = None
+        self.ppu.chr_rom = self.cartridge.chr_rom
         # Wire CPU memory-mapped devices and cartridge mapper backend.
         self.cpu.set_peripherals(self.ppu, self.apu, self.controller, self.controller2)
         self.cpu.set_cartridge(self.cartridge)
@@ -161,10 +140,10 @@ class NES:
 
             # Prefer mapper-owned PRG RAM buffer when mapper exposes one.
             if mapper_ram is not None:
-                mapper_ram[:len(raw)] = list(raw)
+                mapper_ram[:len(raw)] = bytearray(raw)
             else:
                 # Fallback path writes directly into CPU $6000-$7FFF shadow.
-                self.cpu.memory[0x6000:0x6000 + len(raw)] = list(raw)
+                self.cpu.memory[0x6000:0x6000 + len(raw)] = bytearray(raw)
 
     def save_battery_ram(self):
         """Persist battery-backed PRG RAM from '$6000-$7FFF' to disk.
@@ -298,54 +277,14 @@ class NES:
         # Reset vectors/program counter are reloaded after mapping is ready.
         self.cpu.reset()
 
-    def render_screen(self, target_surface=None, dest_rect=None, flip=False):
-        """Present current PPU framebuffer to the host window.
-
-        Args:
-            target_surface: Optional pygame surface to draw into. If 'None',
-                uses 'self.screen'.
-            dest_rect: Optional destination rectangle. If provided, frame is
-                scaled to this rectangle while preserving caller-chosen layout.
-            flip: If 'True', calls 'pygame.display.flip()' after blit.
-
-        Returns:
-            pygame.Surface: Unscaled frame surface built from current PPU RGB
-            framebuffer.
-
-        Side Effects:
-            Blits a pygame surface to the selected target and optionally flips
-            the display buffer.
-
-        NESdev references:
-            https://www.nesdev.org/wiki/PPU_rendering
-            https://www.nesdev.org/wiki/NTSC_video
-        """
-        # Convert internal RGB frame buffer (numpy-like) to pygame surface.
-        surface = pygame.surfarray.make_surface(self.ppu.frame_buffer.swapaxes(0, 1))
-
-        if target_surface is None:
-            target_surface = self.screen
-
-        if dest_rect is None:
-            target_surface.blit(surface, (0, 0))
-        else:
-            scaled = pygame.transform.smoothscale(surface, (dest_rect.width, dest_rect.height))
-            target_surface.blit(scaled, dest_rect.topleft)
-
-        if flip:
-            pygame.display.flip()
-
-        return surface
-
-    def run_frame(self, present=True):
+    def run_frame(self):
         """Run one emulated NTSC frame.
 
         Args:
-            present: If 'True', presents the rendered frame to display at end
-                of frame; if 'False', only advances emulation state.
+            None.
 
         Returns:
-            None.
+            numpy.ndarray: The rendered frame buffer (240, 256, 3).
 
         Side Effects:
             Advances CPU instruction stream, steps PPU at 3x CPU cycle rate,
@@ -379,6 +318,4 @@ class NES:
             # Accumulate frame progress in CPU cycles.
             frame_cycles += cycles_diff
             
-        # Present frame once CPU/PPU/APU are advanced to frame boundary.
-        if present:
-            self.render_screen(flip=True)
+        return self.ppu.frame_buffer

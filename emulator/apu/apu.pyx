@@ -364,7 +364,7 @@ cdef class APU:
 
         NESdev references:
             https://www.nesdev.org/wiki/APU_Frame_Counter
-            https://www.nesdev.org/wiki/APU_status
+            https://www.nesdev.org/wiki/APU
         """
         self.frame_irq_flag = 0
         self.frame_irq_retrigger = 0
@@ -402,7 +402,7 @@ cdef class APU:
 
         NESdev references:
             https://www.nesdev.org/wiki/APU_Frame_Counter
-            https://www.nesdev.org/wiki/APU_status
+            https://www.nesdev.org/wiki/APU
         """
         # Clear IRQ flags and all enabled/length state (matching power-on).
         self.frame_irq_flag = 0
