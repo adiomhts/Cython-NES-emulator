@@ -34,3 +34,21 @@ This document defines common terms used throughout the Cython NES Emulator codeb
 *   **Sprite 0 Hit**: A specific hardware event that occurs when the first non-transparent pixel of the first sprite (Sprite 0) overlaps the first non-transparent pixel of the background on a scanline. It is often used by games to time screen effects.
 *   **Priority**: A sprite attribute that determines whether it is drawn in front of or behind the background layer.
 
+## APU (Audio Processing Unit)
+
+*   **APU**: The audio chip responsible for sound generation in the NES. It features five distinct channels.
+*   **Pulse Channel (Square Wave)**: Two channels that produce square waves with adjustable duty cycles, used for melody and sound effects.
+*   **Triangle Channel**: A channel that produces a pseudo-triangle wave, typically used for bass lines. It lacks volume control.
+*   **Noise Channel**: A channel that generates pseudo-random noise, used for percussion and explosion effects.
+*   **DMC (Delta Modulation Channel)**: A channel that plays low-quality, 1-bit DPCM encoded audio samples from the ROM.
+*   **Envelope**: A hardware unit that automatically decays the volume of a Pulse or Noise channel over time.
+*   **Sweep Unit**: A hardware unit that automatically shifts the frequency of the Pulse channels over time (e.g., laser sounds).
+*   **Length Counter**: A hardware timer that automatically silences a channel after a set duration.
+*   **Frame Counter**: A low-frequency timer that clocks the Envelopes, Sweeps, and Length Counters at regular intervals (approx. 240Hz or 192Hz).
+
+## Cartridge & Mappers (Extended)
+
+*   **Bank Switching**: The process of swapping different sections (banks) of ROM or RAM into the CPU's address space.
+*   **PRG ROM**: Program memory containing the game's code and CPU data.
+*   **CHR ROM / RAM**: Character memory containing pattern tables (graphics). ROM is read-only, while RAM allows the game to dynamically draw new graphics.
+*   **PRG RAM (Save RAM)**: Writable memory on the cartridge often backed by a battery, used to save game progress.

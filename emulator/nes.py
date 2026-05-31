@@ -70,6 +70,8 @@ class NES:
         self.ppu.cpu = self.cpu
         # Give PPU direct cartridge view for CHR reads where needed.
         self.ppu.cartridge = self.cartridge
+        if self.cartridge is not None and hasattr(self.cartridge, 'mapper_instance'):
+            self.ppu.mapper_instance = self.cartridge.mapper_instance
         # Create audio unit and connect it to CPU timing domain.
         self.apu = APU()
         self.apu.cpu = self.cpu

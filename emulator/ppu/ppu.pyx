@@ -99,25 +99,25 @@ cdef class PPU:
         self.sprite0_in_scanline = -1
         self.odd_frame = False
 
-    cdef void increment_v(self):
+    cdef inline void increment_v(self):
         ppu_increment_v(self)
 
-    cdef void increment_scroll_y(self):
+    cdef inline void increment_scroll_y(self):
         ppu_increment_scroll_y(self)
 
-    cdef void increment_scroll_x(self):
+    cdef inline void increment_scroll_x(self):
         ppu_increment_scroll_x(self)
 
-    cdef void increment_v_2007(self):
+    cdef inline void increment_v_2007(self):
         ppu_increment_v_2007(self)
 
-    cdef void copy_x(self):
+    cdef inline void copy_x(self):
         ppu_copy_x(self)
 
-    cdef void copy_y(self):
+    cdef inline void copy_y(self):
         ppu_copy_y(self)
 
-    cdef int get_vram_mirror(self, int addr):
+    cdef inline int get_vram_mirror(self, int addr):
         return ppu_get_vram_mirror(self, addr)
 
     cdef inline bint _has_chr_source(self):
@@ -129,7 +129,7 @@ cdef class PPU:
     cdef inline void _write_chr(self, uint16_t addr, uint8_t value):
         ppu_write_chr(self, addr, value)
 
-    cdef void _step_core(self):
+    cdef inline void _step_core(self):
         ppu_step_core(self)
 
     cpdef public void step(self):

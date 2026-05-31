@@ -49,7 +49,7 @@ cdef class Mapper1(MapperBase):
         self.chr_bank1 = 0
         self.prg_bank_reg = 0
 
-    cpdef public uint8_t read_prg(self, uint16_t address):
+    cdef uint8_t read_prg(self, uint16_t address):
         """Read PRG-RAM/PRG-ROM using MMC1 banking rules.
 
         Args:
@@ -99,7 +99,7 @@ cdef class Mapper1(MapperBase):
 
         return self.prg_rom_view[offset % len(self.prg_rom_view)]
 
-    cpdef public uint8_t read_chr(self, uint16_t address):
+    cdef uint8_t read_chr(self, uint16_t address):
         """Read CHR using MMC1 8KB/4KB bank mode.
 
         Args:
@@ -136,7 +136,7 @@ cdef class Mapper1(MapperBase):
 
         return self.chr_rom_view[offset % chr_len]
 
-    cpdef public void write_prg(self, uint16_t address, uint8_t value):
+    cdef void write_prg(self, uint16_t address, uint8_t value):
         """Write MMC1 control stream or PRG-RAM.
 
         Args:
@@ -192,7 +192,7 @@ cdef class Mapper1(MapperBase):
         self.shift_reg = 0
         self.shift_count = 0
 
-    cpdef public void write_chr(self, uint16_t address, uint8_t value):
+    cdef void write_chr(self, uint16_t address, uint8_t value):
         """Write CHR RAM when cartridge exposes writable CHR storage.
 
         Args:

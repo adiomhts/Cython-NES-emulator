@@ -26,7 +26,19 @@ cimport numpy as cnp
 cdef class MapperBase:
     """Base class defining common mapper structure and memory buffers."""
 
-    cpdef public void clock_irq(self):
+    cdef void clock_irq(self):
+        pass
+
+    cdef uint8_t read_prg(self, uint16_t address):
+        return 0
+
+    cdef uint8_t read_chr(self, uint16_t address):
+        return 0
+
+    cdef void write_prg(self, uint16_t address, uint8_t value):
+        pass
+
+    cdef void write_chr(self, uint16_t address, uint8_t value):
         pass
 
 include "mapper0.pyx"

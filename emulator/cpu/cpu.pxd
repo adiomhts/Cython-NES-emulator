@@ -1,6 +1,7 @@
 import numpy as np
 cimport numpy as cnp
 from libc.stdint cimport uint8_t, uint16_t, int8_t
+from mappers cimport MapperBase
 
 cdef class CPU6502:
     cdef uint8_t A
@@ -22,6 +23,7 @@ cdef class CPU6502:
     cdef object controller
     cdef object controller2
     cdef object cartridge
+    cdef public MapperBase mapper_instance
     cdef int _debug_instr_printed
     cdef int _debug_instr_limit
     cdef int _has_reset_once
@@ -29,22 +31,22 @@ cdef class CPU6502:
     cpdef public void step(self)
     cpdef public void reset(self)
     cpdef public void trigger_interrupt(self, int type)
-    cdef uint8_t fetch(self)
-    cdef uint8_t read_byte(self, uint16_t address)
-    cdef void write_byte(self, uint16_t address, uint8_t value)
-    cdef uint16_t read_word(self, uint16_t address)
-    cdef void push(self, uint8_t value)
-    cdef uint8_t pop(self)
-    cdef void push_word(self, uint16_t value)
-    cdef uint16_t pop_word(self)
-    cdef uint8_t get_P(self)
-    cdef void set_P(self, uint8_t value)
-    cdef uint8_t next_byte(self)
-    cdef uint16_t next_word(self)
-    cdef int8_t next_sbyte(self)
-    cdef uint16_t address(self)
-    cdef uint8_t address_read(self)
-    cdef void address_write(self, uint8_t val)
+    cdef inline uint8_t fetch(self)
+    cdef inline uint8_t read_byte(self, uint16_t address)
+    cdef inline void write_byte(self, uint16_t address, uint8_t value)
+    cdef inline uint16_t read_word(self, uint16_t address)
+    cdef inline void push(self, uint8_t value)
+    cdef inline uint8_t pop(self)
+    cdef inline void push_word(self, uint16_t value)
+    cdef inline uint16_t pop_word(self)
+    cdef inline uint8_t get_P(self)
+    cdef inline void set_P(self, uint8_t value)
+    cdef inline uint8_t next_byte(self)
+    cdef inline uint16_t next_word(self)
+    cdef inline int8_t next_sbyte(self)
+    cdef inline uint16_t address(self)
+    cdef inline uint8_t address_read(self)
+    cdef inline void address_write(self, uint8_t val)
     cdef void execute(self, uint8_t opcode)
     cdef void write_io_register(self, uint16_t reg, uint8_t val)
     cdef uint8_t read_io_register(self, uint16_t reg)

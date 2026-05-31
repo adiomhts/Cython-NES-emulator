@@ -112,101 +112,97 @@ cdef class CPU6502:
                 pass
         self._has_reset_once = 1
 
-    cdef uint8_t fetch(self):
+    cdef inline uint8_t fetch(self):
         cdef uint8_t opcode = self.read_byte(self.PC)
         self.PC += 1
         return opcode
 
-    cdef uint8_t read_byte(self, uint16_t address):
-        # $0000-$1FFF: internal RAM mirrored every 2KB.
-        if 0x0000 <= address <= 0x1FFF:
+    cdef inline uint8_t read_byte(self, uint16_t address):
+        # $0000-$1FFF: internal RAM mirrored every 2KB. (Fast path, most common)
+        if address <= 0x1FFF:
             return self.ram[address & 0x07FF]
             
+        # $8000-$FFFF: cartridge PRG ROM through mapper. (Second most common)
+        if address >= 0x8000:
+            if self.mapper_instance is not None:
+                return self.mapper_instance.read_prg(address)
+            return self.memory[address]
+
         # $2000-$3FFF: PPU registers mirrored every 8 bytes.
-        if 0x2000 <= address <= 0x3FFF:
-            reg = 0x2000 + (address % 8)
-            return self.ppu.read_register(reg)
+        if address >= 0x2000 and address <= 0x3FFF:
+            return self.ppu.read_register(0x2000 + (address % 8))
             
         # $4000-$401F: APU and controller I/O space.
-        if 0x4000 <= address <= 0x401F:
+        if address >= 0x4000 and address <= 0x401F:
             return self.read_io_register(address)
 
         # $6000-$7FFF: cartridge PRG RAM / save RAM window.
-        if 0x6000 <= address <= 0x7FFF:
-            if self.cartridge is not None:
-                try:
-                    if getattr(self.cartridge, 'mapper', 0) == 1:
-                        return self.cartridge.mapper_instance.read_prg(address)
-                except Exception:
-                    pass
+        if address >= 0x6000 and address <= 0x7FFF:
+            if self.mapper_instance is not None:
+                if self.cartridge is not None and getattr(self.cartridge, 'mapper', 0) == 1:
+                    return self.mapper_instance.read_prg(address)
             return self.memory[address]
-            
-        # $8000-$FFFF: cartridge PRG ROM through mapper.
-        if 0x8000 <= address <= 0xFFFF:
-            return self.cartridge.mapper_instance.read_prg(address)
             
         # Generic fallback for any unmapped path.
         return self.memory[address]
 
-    cdef void write_byte(self, uint16_t address, uint8_t value):
+    cdef inline void write_byte(self, uint16_t address, uint8_t value):
+        # Internal RAM writes with mirroring. (Fast path, most common)
+        if address <= 0x1FFF:
+            self.ram[address & 0x07FF] = value
+            return
+            
         # PPU register writes.
-        if 0x2000 <= address <= 0x3FFF:
-            reg = 0x2000 + (address % 8)
-            self.ppu.write_register(reg, value)
+        if address >= 0x2000 and address <= 0x3FFF:
+            self.ppu.write_register(0x2000 + (address % 8), value)
             return
             
         # APU/controller and DMA register writes.
-        if 0x4000 <= address <= 0x401F:
+        if address >= 0x4000 and address <= 0x401F:
             self.write_io_register(address, value)
             return
 
-        # Internal RAM writes with mirroring.
-        if 0x0000 <= address <= 0x1FFF:
-            self.ram[address & 0x07FF] = value
-
         elif 0x6000 <= address <= 0x7FFF:
             # Mapper-specific PRG RAM handling (MMC1 path).
-            if self.cartridge is not None:
-                try:
-                    if getattr(self.cartridge, 'mapper', 0) == 1:
-                        self.cartridge.mapper_instance.write_prg(address, value)
-                        return
-                except Exception:
-                    pass
+            if self.mapper_instance is not None:
+                if self.cartridge is not None and getattr(self.cartridge, 'mapper', 0) == 1:
+                    self.mapper_instance.write_prg(address, value)
+                    return
             self.memory[address] = value
             
         elif address >= 0x8000:
             # Writes to PRG area are mapper control writes for many cartridges.
-            self.cartridge.mapper_instance.write_prg(address, value)
+            if self.mapper_instance is not None:
+                self.mapper_instance.write_prg(address, value)
             
         else:
             self.memory[address] = value
 
-    cdef uint16_t read_word(self, uint16_t address):
+    cdef inline uint16_t read_word(self, uint16_t address):
         # 6502 words are little-endian: low byte then high byte.
         return <uint16_t>(self.read_byte(address) | (self.read_byte(address + 1) << 8))
 
-    cdef void push(self, uint8_t value):
+    cdef inline void push(self, uint8_t value):
         # Stack is fixed at page $0100 and grows downward.
         self.ram[0x0100 + self.SP] = value
         self.SP -= 1
 
-    cdef uint8_t pop(self):
+    cdef inline uint8_t pop(self):
         # Pop reverses push order and stack grows upward on read.
         self.SP += 1
         return self.ram[0x0100 + self.SP]
 
-    cdef void push_word(self, uint16_t value):
+    cdef inline void push_word(self, uint16_t value):
         # Push high then low, matching 6502 interrupt/call conventions.
         self.push(<uint8_t>(value >> 8))
         self.push(<uint8_t>(value & 0xFF))
 
-    cdef uint16_t pop_word(self):
+    cdef inline uint16_t pop_word(self):
         cdef uint16_t lo = self.pop()
         cdef uint16_t hi = self.pop()
         return lo | (hi << 8)
 
-    cdef uint8_t get_P(self):
+    cdef inline uint8_t get_P(self):
         return <uint8_t>(
             (self.F.carry << 0) |
             (self.F.zero << 1) |
@@ -218,7 +214,7 @@ cdef class CPU6502:
             (self.F.negative << 7)
         )
 
-    cdef void set_P(self, uint8_t value):
+    cdef inline void set_P(self, uint8_t value):
         self.F.carry = (value & 0x01) > 0
         self.F.zero = (value & 0x02) > 0
         self.F.interrupts_disabled = (value & 0x04) > 0
@@ -227,22 +223,22 @@ cdef class CPU6502:
         self.F.overflow = (value & 0x40) > 0
         self.F.negative = (value & 0x80) > 0
 
-    cdef uint8_t next_byte(self):
+    cdef inline uint8_t next_byte(self):
         # Fetch one byte at PC and post-increment.
         cdef uint8_t value = self.read_byte(self.PC)
         self.PC += 1
         return value
 
-    cdef uint16_t next_word(self):
+    cdef inline uint16_t next_word(self):
         # Fetch little-endian 16-bit operand and advance PC by 2.
         cdef uint16_t value = self.read_word(self.PC)
         self.PC += 2
         return value
 
-    cdef int8_t next_sbyte(self):
+    cdef inline int8_t next_sbyte(self):
         return <int8_t>self.next_byte()
 
-    cdef uint16_t address(self):
+    cdef inline uint16_t address(self):
         cdef OpcodeDef defn = opcode_defs[self.current_instruction]
         cdef uint16_t addr
         cdef uint8_t off
@@ -290,7 +286,7 @@ cdef class CPU6502:
             addr = 0
         return addr
 
-    cdef uint8_t address_read(self):
+    cdef inline uint8_t address_read(self):
         cdef OpcodeDef defn = opcode_defs[self.current_instruction]
         if defn.mode == DIRECT:
             # Accumulator-addressed ops read A directly.
@@ -301,7 +297,7 @@ cdef class CPU6502:
             self.has_current_address = True
         return self.read_byte(self.current_memory_address)
 
-    cdef void address_write(self, uint8_t val):
+    cdef inline void address_write(self, uint8_t val):
         cdef OpcodeDef defn = opcode_defs[self.current_instruction]
         if defn.mode == DIRECT:
             # Accumulator-addressed write targets A register directly.
@@ -458,6 +454,8 @@ cdef class CPU6502:
         """
         # Mapper object owns bank switching behavior for PRG/CHR accesses.
         self.cartridge = cartridge
+        if cartridge is not None and hasattr(cartridge, 'mapper_instance'):
+            self.mapper_instance = <MapperBase>cartridge.mapper_instance
 
     cpdef public void step(self):
         """Execute one CPU step.
@@ -477,12 +475,8 @@ cdef class CPU6502:
             https://www.nesdev.org/wiki/CPU_interrupts
         """
         # Mapper (e.g., MMC3) may request IRQ asynchronously.
-        if self.cartridge is not None:
-            try:
-                if getattr(self.cartridge.mapper_instance, 'irq_pending', 0):
-                    self.interrupts[1] = True
-            except Exception:
-                pass
+        if self.mapper_instance is not None and self.mapper_instance.irq_pending:
+            self.interrupts[1] = True
 
         # Service pending NMI/IRQ before fetching next opcode.
         for i in range(2):

@@ -1,6 +1,7 @@
 import numpy as np
 cimport numpy as cnp
 from libc.stdint cimport uint8_t, uint16_t
+from mappers cimport MapperBase
 
 cdef class PPU:
     cdef int scanline, cycle
@@ -34,18 +35,19 @@ cdef class PPU:
     cdef public object chr_rom
     cdef public object cpu
     cdef public object cartridge
+    cdef public MapperBase mapper_instance
 
-    cdef void increment_v(self)
-    cdef void increment_scroll_y(self)
-    cdef void increment_scroll_x(self)
-    cdef void increment_v_2007(self)
-    cdef void copy_x(self)
-    cdef void copy_y(self)
-    cdef int get_vram_mirror(self, int addr)
-    cdef bint _has_chr_source(self)
-    cdef uint8_t _read_chr(self, uint16_t addr)
-    cdef void _write_chr(self, uint16_t addr, uint8_t value)
-    cdef void _step_core(self)
+    cdef inline void increment_v(self)
+    cdef inline void increment_scroll_y(self)
+    cdef inline void increment_scroll_x(self)
+    cdef inline void increment_v_2007(self)
+    cdef inline void copy_x(self)
+    cdef inline void copy_y(self)
+    cdef inline int get_vram_mirror(self, int addr)
+    cdef inline bint _has_chr_source(self)
+    cdef inline uint8_t _read_chr(self, uint16_t addr)
+    cdef inline void _write_chr(self, uint16_t addr, uint8_t value)
+    cdef inline void _step_core(self)
     cpdef public void step(self)
     cpdef public void step_many(self, int steps)
     cpdef public void trigger_vblank(self)

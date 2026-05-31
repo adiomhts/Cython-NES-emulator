@@ -1,3 +1,12 @@
+"""Graphical Launcher for the Cython NES Emulator.
+
+This module provides a PyQt5-based graphical user interface to easily browse
+for ROM files, manage a list of recently played games, configure keyboard 
+controls, and launch the main emulator process.
+
+It acts as a user-friendly wrapper around `main.py`.
+"""
+
 import json
 import os
 import re

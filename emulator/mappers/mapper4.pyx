@@ -89,7 +89,7 @@ cdef class Mapper4(MapperBase):
         # Store previous A12 level to detect next edge.
         self.last_a12 = a12
 
-    cpdef public void clock_irq(self):
+    cdef void clock_irq(self):
         # Scanline-based IRQ clocking
         if self.irq_counter == 0 or self.irq_reload:
             self.irq_counter = self.irq_latch
@@ -100,7 +100,7 @@ cdef class Mapper4(MapperBase):
         if self.irq_counter == 0 and self.irq_enable:
             self.irq_pending = 1
 
-    cpdef public uint8_t read_prg(self, uint16_t address):
+    cdef uint8_t read_prg(self, uint16_t address):
         """Read PRG from selected mapper 4 PRG bank.
 
         Args:
@@ -142,7 +142,7 @@ cdef class Mapper4(MapperBase):
         offset = bank * 0x2000 + (address & 0x1FFF)
         return self.prg_rom_view[offset % len(self.prg_rom_view)]
 
-    cpdef public uint8_t read_chr(self, uint16_t address):
+    cdef uint8_t read_chr(self, uint16_t address):
         """Read CHR from selected mapper 4 CHR bank.
 
         Args:
@@ -198,7 +198,7 @@ cdef class Mapper4(MapperBase):
         offset = bank * 0x400 + (address & 0x03FF)
         return self.chr_rom_view[offset % len(self.chr_rom_view)]
 
-    cpdef public void write_prg(self, uint16_t address, uint8_t value):
+    cdef void write_prg(self, uint16_t address, uint8_t value):
         """Handle MMC3 register writes for banking, mirroring, and IRQ control.
 
         Args:
@@ -241,7 +241,7 @@ cdef class Mapper4(MapperBase):
                 # Enable IRQ generation.
                 self.irq_enable = 1
 
-    cpdef public void write_chr(self, uint16_t address, uint8_t value):
+    cdef void write_chr(self, uint16_t address, uint8_t value):
         """Write CHR RAM when mapper cartridge provides writable CHR memory.
 
         Args:

@@ -33,7 +33,7 @@ cdef class Mapper3(MapperBase):
         self.chr_rom_view = self.chr_rom
         self.chr_bank = 0
 
-    cpdef public uint8_t read_prg(self, uint16_t address):
+    cdef uint8_t read_prg(self, uint16_t address):
         """Read PRG from fixed ROM mapping.
 
         Args:
@@ -47,7 +47,7 @@ cdef class Mapper3(MapperBase):
         """
         return self.prg_rom_view[address % len(self.prg_rom_view)]
 
-    cpdef public uint8_t read_chr(self, uint16_t address):
+    cdef uint8_t read_chr(self, uint16_t address):
         """Read CHR from active CNROM bank.
 
         Args:
@@ -72,7 +72,7 @@ cdef class Mapper3(MapperBase):
         offset = bank * 0x2000 + (address & 0x1FFF)
         return self.chr_rom_view[offset % len(self.chr_rom_view)]
 
-    cpdef public void write_prg(self, uint16_t address, uint8_t value):
+    cdef void write_prg(self, uint16_t address, uint8_t value):
         """Select active CNROM 8KB CHR bank.
 
         Args:
@@ -95,7 +95,7 @@ cdef class Mapper3(MapperBase):
         # CNROM bank select usually lives in low bits.
         self.chr_bank = <uint8_t>((value & 0x1F) % chr_banks_8k)
 
-    cpdef public void write_chr(self, uint16_t address, uint8_t value):
+    cdef void write_chr(self, uint16_t address, uint8_t value):
         """Handle CHR writes when carriage uses CHR RAM.
 
         Args:

@@ -1,14 +1,14 @@
-# NES Emulator (Bachelor's Thesis) 🎮
+# NES Emulator (Bachelor's Thesis)
 
 A high-performance **Nintendo Entertainment System (NES)** emulator written in **Python** and optimized with **Cython**. This project explores the boundaries of hardware emulation performance within the Python ecosystem.
 
-## 🚀 Project Overview
+## Project Overview
 
 This project is my Bachelor's Thesis at **Palacký University Olomouc**. The core challenge is to emulate the intricate timing and hardware interactions of the NES while overcoming the performance limitations of interpreted Python.
 
 By using **Cython**, performance-critical components (instruction decoding, memory mapping, and PPU rendering) are in C-extensions. This bridges the gap between Python's high-level flexibility and C's execution speed.
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 * **Core:** Python 3.10+
 * **Optimization:** Cython (C-Extensions)
@@ -16,16 +16,14 @@ By using **Cython**, performance-critical components (instruction decoding, memo
 * **Data:** NumPy
 * **Version Control:** Git
 
-## 📺 Media & Demonstration
+## Media & Demonstration
 
 ### Current Rendering State
 Below is a demonstration of the current PPU background rendering capabilities.
 
 ![NES Emulator Gameplay Preview](example.gif)
 
-*Caption: Current state of the PPU rendering engine (Background tiles and Nametables).*
-
-## ⚙️ Hardware Implementation Progress
+## Hardware Implementation Progress
 
 ### CPU (Ricoh 2A03)
 * [x] Full 6502 instruction set (official opcodes).
@@ -35,25 +33,36 @@ Below is a demonstration of the current PPU background rendering capabilities.
 ### PPU (Picture Processing Unit)
 * [x] Sprite rendering (OAM).
 * [x] Scrolling logic and fine X/Y offsets.
-* [ ] Background rendering (tiles and nametables).
+* [x] Background rendering (tiles and nametables).
 
-### APU & Mappers
-* [ ] Pulse, Triangle, and Noise channels.
+### APU (Audio Processing Unit)
+* [x] Pulse 1 & 2 channels.
+* [x] Triangle channel.
+* [x] Noise channel.
+* [x] DMC (Delta Modulation Channel).
+
+### Cartridge & Mappers
 * [x] iNES (.nes) file format support.
-* [ ] Common Mappers (MMC1, MMC3).
+* [x] Mapper 0 (NROM)
+* [x] Mapper 1 (MMC1)
+* [x] Mapper 2 (UxROM)
+* [x] Mapper 3 (CNROM)
+* [-] Mapper 4 (MMC3)
 
-## 📈 Performance & Current Status
+## 📈 Performance & Cython Optimization Strategy
 
-The project is under active development. The primary bottleneck remains the main execution loop and PPU synchronization.
+To achieve playable framerates, this emulator leverages **Cython** extensively:
+- **C-Level Types & Memory Arrays:** Emulated memory (RAM, VRAM, palettes) uses typed memoryviews, bypassing Python object overhead.
+- **Virtual Method Tables (VTable):** Device polymorphism (e.g., Mapper routing) is implemented via `cdef public` classes. This ensures million-times-a-second hardware polling completely bypasses Python's dynamic dispatch.
+- **Compiler Directives:** Built with `-O3` and `-flto` while avoiding runtime boundary checks (`boundscheck=False`, `wraparound=False`).
 
-## 🗺️ Roadmap (Future Optimizations)
+## Roadmap & Current Focus
 
-* **Solve visual bugs:** Most of background tiles are displayed with wrong colors, on-screen text issues.
-* **Boundary Optimization:** Minimize Python-to-C overhead by keeping the main execution loop entirely within compiled code.
-* **60 FPS Target:** Reach a stable 60 FPS.
-* **Sound Support:** Implement the APU.
+* **CPU Instruction Fixes:** Debugging edge cases in specific 6502 instructions (e.g., branch delays, indexed addressing) to achieve 100% pass rates on `nes-test-roms`.
+* **Cycle-Accurate Interrupt Timing:** Aligning IRQ and NMI timing precisely between the PPU, CPU, and MMC3.
+* **Audio Synchronization:** Smoothing out audio buffer delivery to Pygame/SDL to prevent audio crackling.
 
-## 🔧 Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 * Python 3.10+
@@ -83,12 +92,11 @@ python setup.py build_ext --inplace
 python main.py rom.nes
 ```
 
-# Optional Qt launcher (ROM picker + recent games)
+# Optional Qt launcher (ROM picker/input settings)
 ``` bash
 python qt_launcher.py
 ```
 
-## 👨‍💻 Author
+## Author
 
 **Adil Abuzyarov** Computer Science Student at Palacký University Olomouc  
-[LinkedIn](https://www.linkedin.com/in/adil-abuzyarov-a55210273/) | [GitHub](https://github.com/adiomhts)

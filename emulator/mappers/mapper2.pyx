@@ -34,7 +34,7 @@ cdef class Mapper2(MapperBase):
         self.chr_rom_view = self.chr_rom
         self.prg_bank = 0
 
-    cpdef public uint8_t read_prg(self, uint16_t address):
+    cdef uint8_t read_prg(self, uint16_t address):
         """Read PRG from active 16KB bank window.
 
         Args:
@@ -65,7 +65,7 @@ cdef class Mapper2(MapperBase):
 
         return self.prg_rom_view[offset % len(self.prg_rom_view)]
 
-    cpdef public uint8_t read_chr(self, uint16_t address):
+    cdef uint8_t read_chr(self, uint16_t address):
         """Read CHR directly without CHR bank switching.
 
         Args:
@@ -79,7 +79,7 @@ cdef class Mapper2(MapperBase):
         """
         return self.chr_rom_view[address % len(self.chr_rom_view)]
 
-    cpdef public void write_prg(self, uint16_t address, uint8_t value):
+    cdef void write_prg(self, uint16_t address, uint8_t value):
         """Select switchable UxROM lower 16KB PRG bank.
 
         Args:
@@ -102,7 +102,7 @@ cdef class Mapper2(MapperBase):
         # UxROM uses the full byte for bank id (though standard boards only use a few bits). This implementation masks the lower nibble.
         self.prg_bank = <uint8_t>((value & 0x0F) % prg_banks_16k)
 
-    cpdef public void write_chr(self, uint16_t address, uint8_t value):
+    cdef void write_chr(self, uint16_t address, uint8_t value):
         """Handle CHR writes when cartridge uses CHR RAM.
 
         Args:

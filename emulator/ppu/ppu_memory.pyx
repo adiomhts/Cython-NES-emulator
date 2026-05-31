@@ -34,13 +34,9 @@ cdef int ppu_get_vram_mirror(PPU self, int addr):
         bank = 0
 
         mirror_mode = self.mirroring
-        if self.cartridge is not None:
-            try:
-                # Only mappers that dynamically change mirroring should override it.
-                if getattr(self.cartridge, 'mapper', 0) in (1, 4):
-                    mirror_mode = self.cartridge.mapper_instance.mirroring
-            except Exception:
-                pass
+        if self.mapper_instance is not None:
+            if self.cartridge is not None and getattr(self.cartridge, 'mapper', 0) in (1, 4):
+                mirror_mode = self.mapper_instance.mirroring
 
         if mirror_mode == 0:
             # Horizontal mirroring: NT0/NT1 share, NT2/NT3 share.
@@ -65,23 +61,16 @@ cdef inline bint ppu_has_chr_source(PPU self):
 
 
 cdef inline uint8_t ppu_read_chr(PPU self, uint16_t addr):
-    if self.cartridge is not None:
-        try:
-            return self.cartridge.mapper_instance.read_chr(addr)
-        except Exception as e:
-            print("read_chr exception:", e)
-            pass
+    if self.mapper_instance is not None:
+        return self.mapper_instance.read_chr(addr)
     if self.chr_rom is not None and addr < len(self.chr_rom):
         return self.chr_rom[addr]
     return 0
 
 
 cdef inline void ppu_write_chr(PPU self, uint16_t addr, uint8_t value):
-    if self.cartridge is not None:
-        try:
-            self.cartridge.mapper_instance.write_chr(addr, value)
-            return
-        except Exception:
-            pass
+    if self.mapper_instance is not None:
+        self.mapper_instance.write_chr(addr, value)
+        return
     if self.chr_rom is not None and addr < len(self.chr_rom):
         self.chr_rom[addr] = value

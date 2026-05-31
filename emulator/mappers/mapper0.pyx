@@ -40,7 +40,7 @@ cdef class Mapper0(MapperBase):
         self.prg_rom_view = self.prg_rom
         self.chr_rom_view = self.chr_rom
 
-    cpdef public uint8_t read_prg(self, uint16_t address):
+    cdef uint8_t read_prg(self, uint16_t address):
         """Read PRG byte from CPU-visible cartridge space.
 
         Args:
@@ -58,7 +58,7 @@ cdef class Mapper0(MapperBase):
             return self.prg_rom_view[address % len(self.prg_rom_view)]
         return 0
 
-    cpdef public uint8_t read_chr(self, uint16_t address):
+    cdef uint8_t read_chr(self, uint16_t address):
         """Read CHR byte for PPU pattern-table fetch.
 
         Args:
@@ -73,7 +73,7 @@ cdef class Mapper0(MapperBase):
         """
         return self.chr_rom_view[address % len(self.chr_rom_view)]
 
-    cpdef public void write_prg(self, uint16_t address, uint8_t value):
+    cdef void write_prg(self, uint16_t address, uint8_t value):
         """Handle PRG writes in NROM context.
 
         Args:
@@ -91,7 +91,7 @@ cdef class Mapper0(MapperBase):
         if address >= 0x8000:
             self.prg_rom_view[address % len(self.prg_rom_view)] = value
 
-    cpdef public void write_chr(self, uint16_t address, uint8_t value):
+    cdef void write_chr(self, uint16_t address, uint8_t value):
         """Write CHR byte when cartridge uses CHR RAM.
 
         Args:
