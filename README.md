@@ -19,7 +19,7 @@ By using **Cython**, performance-critical components (instruction decoding, memo
 ## Media & Demonstration
 
 ### Current Rendering State
-Below is a demonstration of the current PPU background rendering capabilities.
+Below is a demonstration of the current gameplay rendering capabilities.
 
 ![NES Emulator Gameplay Preview](example.gif)
 
