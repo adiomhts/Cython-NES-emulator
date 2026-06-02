@@ -16,7 +16,7 @@ cdef class Mapper4(MapperBase):
     """Mapper 4 (MMC3-like) with PRG/CHR banking and IRQ logic.
 
     NESdev references:
-    - https://www.nesdev.org/wiki/Mapper_004
+    - https://www.nesdev.org/wiki/INES_Mapper_004
     - https://www.nesdev.org/wiki/MMC3
     """
 
@@ -210,7 +210,7 @@ cdef class Mapper4(MapperBase):
 
         NESdev references:
             https://www.nesdev.org/wiki/MMC3
-            https://www.nesdev.org/wiki/Mapper_004
+            https://www.nesdev.org/wiki/INES_Mapper_004
         """
         if 0x8000 <= address < 0xA000:
             if (address & 1) == 0:
