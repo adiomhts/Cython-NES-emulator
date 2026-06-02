@@ -265,6 +265,10 @@ class NESLauncher(QWidget):
         subprocess.Popen(
             [sys.executable, str(emulator_entry), rom_path],
             cwd=str(Path(__file__).parent),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True
         )
 
         self.status_label.setText("Game launched")
