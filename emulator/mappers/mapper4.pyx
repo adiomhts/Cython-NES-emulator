@@ -47,6 +47,7 @@ cdef class Mapper4(MapperBase):
         self.irq_enable = 0
         self.irq_pending = 0
         self.last_a12 = 0
+        self.a12_low_counter = 0
         self.bank_regs[0] = 0
         self.bank_regs[1] = 0
         self.bank_regs[2] = 0
@@ -72,19 +73,25 @@ cdef class Mapper4(MapperBase):
 
         # A12 bit toggles when PPU fetches from upper/lower pattern halves.
         a12 = 1 if (address & 0x1000) else 0
-        if a12 and not self.last_a12:
-            # Rising edge is the moment MMC3 updates its IRQ counter.
-            if self.irq_counter == 0 or self.irq_reload:
-                # Reload path copies latch into counter.
-                self.irq_counter = self.irq_latch
-                self.irq_reload = 0
-            else:
-                # Normal path decrements counter.
-                self.irq_counter -= 1
+        
+        if a12 == 0:
+            self.a12_low_counter += 1
+        elif a12 == 1:
+            if not self.last_a12 and self.a12_low_counter >= 3:
+                # Rising edge is the moment MMC3 updates its IRQ counter.
+                if self.irq_counter == 0 or self.irq_reload:
+                    # Reload path copies latch into counter.
+                    self.irq_counter = self.irq_latch
+                    self.irq_reload = 0
+                else:
+                    # Normal path decrements counter.
+                    self.irq_counter -= 1
 
-            if self.irq_counter == 0 and self.irq_enable:
-                # CPU will consume this pending IRQ on next instruction boundary.
-                self.irq_pending = 1
+                if self.irq_counter == 0 and self.irq_enable:
+                    # CPU will consume this pending IRQ on next instruction boundary.
+                    self.irq_pending = 1
+            
+            self.a12_low_counter = 0
 
         # Store previous A12 level to detect next edge.
         self.last_a12 = a12

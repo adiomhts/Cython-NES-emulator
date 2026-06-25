@@ -439,6 +439,17 @@ cpdef void ppu_sprite_render(PPU self):
                 pal_idx = int(self.palette_ram[palette_index * 4 + pix]) & 0x3F
                 self.frame_buffer[self.scanline, sx] = self.nes_palette[pal_idx]
 
+    # Dummy fetches for MMC3 IRQ clocking
+    cdef int dummy_fetches = 8 - self.sprite_count
+    cdef int dummy_addr
+    if height == 16:
+        dummy_addr = 0x1FF0
+    else:
+        dummy_addr = 0x1FF0 if (self.ctrl & 0x08) else 0x0FF0
+
+    for i in range(dummy_fetches):
+        self._read_chr(<uint16_t>dummy_addr)
+        self._read_chr(<uint16_t>(dummy_addr + 8))
 
 cpdef void ppu_perform_dma(PPU self, uint8_t[:] page):
     """Copies a 256-byte page from CPU memory into the PPU's OAM.

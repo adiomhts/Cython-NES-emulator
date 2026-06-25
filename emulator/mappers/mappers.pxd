@@ -57,6 +57,7 @@ cdef class Mapper4(MapperBase):
     cdef public uint8_t[:] prg_ram
     cdef public uint8_t[:] prg_ram_view
     cdef public uint8_t bank_select, prg_mode, chr_mode, irq_latch, irq_counter, irq_reload, irq_enable, last_a12
+    cdef public int a12_low_counter
     cdef public uint8_t bank_regs[8]
     cdef uint8_t read_prg(self, uint16_t address)
     cdef uint8_t read_chr(self, uint16_t address)
